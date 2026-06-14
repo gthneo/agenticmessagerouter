@@ -210,7 +210,14 @@ def cmd_ignite(conn, ctx):
     else:
         print(f"❌ 未知渠道: {ch} (支持: wechat, lark)")
         return
-    n = ingest_run.ignite(conn, adapter, account_id=aid, actor=_actor())
+    try:
+        n = ingest_run.ignite(conn, adapter, account_id=aid, actor=_actor())
+    except RuntimeError as e:
+        print(f"❌ 点火失败 [{ch}]: {e}")
+        if ch == "lark":
+            print("  提示: 飞书需 user 身份授权,且 App 须含 im:chat:read / im:message:read "
+                  "scope。在该机跑: lark-cli auth login --as user 重新授权。")
+        return
     print(f"✅ 点火完成 [{ch}]: 新增 {n} 条消息入库 (account #{aid})")
 
 

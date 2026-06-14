@@ -60,6 +60,7 @@ jl reset --all --confirm     # 连 accounts 注册表一起清
 
 ```sh
 jl ignite                  # 点火：从 fullwechat(@.178) 拉活跃会话的近期消息入库（群默认 mute）
+jl ignite lark             # 点火飞书：lark-cli(@.178, user 身份)拉群/话题会话入库（account #3, 群默认 mute）
 jl poll                    # 5min 循环增量拉新（--interval 秒；Ctrl-C 停）
 jl web                     # 起只读 Web 收件箱（默认 0.0.0.0:8088；--host/--port）
 ```
@@ -79,7 +80,7 @@ jl push phone --remote http://192.168.31.178:8088 --token <web_token>   # 电话
 
 - 服务端 .178 暴露**鉴权的 `POST /api/ingest`**(`JL_WEB_TOKEN`,幂等去重),采集器把会话/消息正规化成 `{account, conversations:[{conv,msgs}]}` POST 上去,调 `db.ingest_records` 入库。
 - `account_id`:wechat=1、phone=2(8-bit 多账号)。摄取=收集**自己的**数据(非对外发送),与 ignite/poll 同类,不走发送审批门。
-- 飞书(lark-cli)/企微(wecom-cli)适配器复用同一 push 路径(下一批)。Mac 侧可挂 cron/launchd 定时 push。
+- 飞书(lark-cli)/企微(wecom-cli)**CLI 跨平台,装在 .178 本地跑**(account feishu=3 / wecom),`jl ignite lark` 直接本地入库,**不用 push**(与 fullwechat 同)。前置:在 .178 `lark-cli auth login --as user` 且 App 含 `im:chat:read`/`im:message:read` scope。当前飞书覆盖**群/话题**;P2P 私聊、发件人名解析、out 方向判定为后续。
 
 ## 人归一(③ · 跨渠道同一个人）
 
