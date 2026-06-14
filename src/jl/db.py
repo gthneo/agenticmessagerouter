@@ -195,6 +195,90 @@ def get_conversation(conn, conversation_id):
     return dict(row) if row else None
 
 
+# ----- person linking (zero-LLM deterministic + HITL) -----------------------
+
+def _match_person(conn, platform, chat_id):
+    """[person_id] whose channels match this conversation's peer id.
+    phone -> tail_match (country-code tolerant); others -> exact identifier."""
+    rows = conn.execute("SELECT person_id, kind, identifier FROM channels").fetchall()
+    hits = set()
+    if platform == "phone":
+        from .channels.phone import tail_match
+        for r in rows:
+            if r["kind"] == "phone" and tail_match(r["identifier"], chat_id):
+                hits.add(r["person_id"])
+    else:
+        for r in rows:
+            if r["kind"] == platform and r["identifier"] == chat_id:
+                hits.add(r["person_id"])
+    return sorted(hits)
+
+
+def link_conversations(conn):
+    """Auto-link unlinked conversations to persons by exact/tail channel match.
+    Skips ambiguous (>1 candidate) — those go to the human. Returns count linked."""
+    n = 0
+    for c in conn.execute(
+            "SELECT id, platform, chat_id FROM conversations WHERE person_id IS NULL").fetchall():
+        cands = _match_person(conn, c["platform"], c["chat_id"])
+        if len(cands) == 1:
+            conn.execute("UPDATE conversations SET person_id=?, updated_at=? WHERE id=?",
+                         (cands[0], _now(), c["id"]))
+            n += 1
+    conn.commit()
+    return n
+
+
+def set_conversation_person(conn, conversation_id, person_id):
+    """Human-confirmed link. LEARNS the conversation's peer id as a channel on the
+    person so future auto-links stick. Logs a 'link' event."""
+    row = conn.execute("SELECT platform, chat_id FROM conversations WHERE id=?",
+                        (conversation_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"no conversation {conversation_id}")
+    upsert_channel(conn, person_id=person_id, kind=row["platform"], identifier=row["chat_id"])
+    conn.execute("UPDATE conversations SET person_id=?, updated_at=? WHERE id=?",
+                 (person_id, _now(), conversation_id))
+    conn.commit()
+    log_event(conn, kind="link", person_id=person_id, actor="user",
+              detail={"conversation_id": conversation_id, "learned": row["chat_id"]})
+
+
+def suggest_merges(conn, limit=50):
+    """HITL candidates: unlinked conversations whose name matches a person's name/alias.
+    Returns [{conversation_id, name, platform, candidates:[person dict]}]. No silent merge."""
+    persons = get_persons(conn)
+    out = []
+    rows = conn.execute(
+        "SELECT id, platform, name, chat_id FROM conversations WHERE person_id IS NULL "
+        "AND name != '' ORDER BY last_activity_at DESC LIMIT ?", (limit,)).fetchall()
+    for c in rows:
+        cands = []
+        for p in persons:
+            keys = [k for k in ([p["name"]] + list(p.get("aliases", []))) if k]
+            if any(k in c["name"] or c["name"] in k for k in keys):
+                cands.append(p)
+        if cands:
+            out.append({"conversation_id": c["id"], "name": c["name"],
+                        "platform": c["platform"], "candidates": cands})
+    return out
+
+
+def persons_overview(conn):
+    """Each person that HAS linked conversations, with channel set + latest activity."""
+    out = []
+    for p in get_persons(conn):
+        convs = get_conversations(conn, person_id=p["id"])
+        if not convs:
+            continue
+        last = max((c["last_activity_at"] or 0 for c in convs), default=0)
+        out.append({"id": p["id"], "name": p["name"], "category": p["category"],
+                    "channels": sorted({c["platform"] for c in convs}),
+                    "conversations": len(convs), "last_activity_at": last})
+    out.sort(key=lambda x: x["last_activity_at"], reverse=True)
+    return out
+
+
 # ----- messages -------------------------------------------------------------
 
 def insert_messages(conn, conversation_id, records):
