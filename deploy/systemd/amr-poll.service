@@ -1,0 +1,16 @@
+[Unit]
+Description=AMR ingest poller (jl, 5-min recent re-pull)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/amr
+Environment=PYTHONPATH=%h/amr/src
+Environment=AGENT_WECHAT_URL=http://localhost:6174
+Environment=JL_ACTOR=poll
+ExecStart=__PYTHON__ -m jl.cli poll --interval 300
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
