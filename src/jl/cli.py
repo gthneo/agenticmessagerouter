@@ -61,6 +61,12 @@ def route(args):
     if a == "web":
         return ("web", {"port": int(_opt_value(args, "--port") or 8088),
                         "host": _opt_value(args, "--host") or "0.0.0.0"})
+    if a == "push":
+        return ("push", {
+            "channel": args[1] if len(args) > 1 and not args[1].startswith("--") else "phone",
+            "remote": _opt_value(args, "--remote") or "http://192.168.31.178:8088",
+            "token": _opt_value(args, "--token") or "",
+        })
     return ("detail", {"name": a})
 
 
@@ -216,6 +222,21 @@ def cmd_web(conn, ctx):
               port=ctx.get("port", 8088))
 
 
+def cmd_push(conn, ctx):
+    from . import push as push_mod
+    ch = ctx.get("channel", "phone")
+    if ch == "phone":
+        from .channels.phone import PhoneAdapter
+        adapter, account_id, label = PhoneAdapter(), 2, "phone"
+    else:
+        print(f"❌ 未知渠道: {ch} (当前支持: phone)")
+        return
+    payload = push_mod.build_payload(adapter, account_id=account_id, label=label)
+    nconv = len(payload["conversations"])
+    res = push_mod.push(ctx["remote"], ctx.get("token", ""), payload)
+    print(f"✅ push {ch}: {nconv} 会话 → {ctx['remote']}  入库 {res.get('messages')} 条新消息")
+
+
 # ----- helpers --------------------------------------------------------------
 
 def _find_person(conn, name):
@@ -268,6 +289,8 @@ def main(argv=None):
         ctx["interval"] = params["interval"]; cmd_poll(conn, ctx)
     elif command == "web":
         ctx.update(params); cmd_web(conn, ctx)
+    elif command == "push":
+        ctx.update(params); cmd_push(conn, ctx)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()
