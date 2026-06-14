@@ -575,7 +575,8 @@ def test_insert_messages_updates_last_activity(conn):
     assert conv["last_activity_at"] == 5000
 
 
-def test_search_messages_finds_cjk_substring(conn):
+def test_search_messages_finds_short_cjk_substring_via_like(conn):
+    # 2-char query — below the FTS5 trigram floor, served by the LIKE fallback
     cid = _seed_conv(conn)
     db.insert_messages(conn, cid, [
         ingest.MsgRecord(msg_key="x:1", ts=1000, content="记得带合同来", sender="张三"),
@@ -584,6 +585,18 @@ def test_search_messages_finds_cjk_substring(conn):
     hits = db.search_messages(conn, "合同")
     assert len(hits) == 1
     assert hits[0]["content"] == "记得带合同来"
+
+
+def test_search_messages_finds_long_cjk_substring_via_fts(conn):
+    # 3+-char query — served by the FTS5 trigram index
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [
+        ingest.MsgRecord(msg_key="x:1", ts=1000, content="请尽快确认合同条款", sender="张三"),
+        ingest.MsgRecord(msg_key="x:2", ts=2000, content="今天天气不错", sender="李四"),
+    ])
+    hits = db.search_messages(conn, "确认合同")
+    assert len(hits) == 1
+    assert hits[0]["content"] == "请尽快确认合同条款"
 
 
 def test_search_messages_account_filter(conn):
@@ -653,13 +666,28 @@ def insert_messages(conn, conversation_id, records):
 
 
 def search_messages(conn, query, *, limit=50, account_id=None):
-    """FTS5 keyword search over message content, newest-relevant first."""
+    """Keyword search over message content, newest-relevant first.
+
+    The FTS5 trigram tokenizer only matches queries of >= 3 characters, but
+    2-char words dominate Chinese (合同/发票/明天). So for queries shorter than 3
+    chars we fall back to a LIKE substring scan; >= 3 chars use FTS5 + bm25 rank.
+    """
+    q = (query or "").strip()
+    if len(q) < 3:
+        sql = "SELECT m.* FROM messages m WHERE m.content LIKE ?"
+        args = [f"%{q}%"]
+        if account_id is not None:
+            sql += " AND m.account_id=?"
+            args.append(account_id)
+        sql += " ORDER BY m.ts DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
     sql = """
         SELECT m.* FROM messages_fts f
         JOIN messages m ON m.id = f.rowid
         WHERE messages_fts MATCH ?
     """
-    args = [query]
+    args = [q]
     if account_id is not None:
         sql += " AND m.account_id=?"
         args.append(account_id)
