@@ -190,6 +190,11 @@ def link_person(conn, conversation_id, person_id):
     conn.commit()
 
 
+def get_conversation(conn, conversation_id):
+    row = conn.execute("SELECT * FROM conversations WHERE id=?", (conversation_id,)).fetchone()
+    return dict(row) if row else None
+
+
 # ----- messages -------------------------------------------------------------
 
 def insert_messages(conn, conversation_id, records):
@@ -229,6 +234,18 @@ def insert_messages(conn, conversation_id, records):
         )
     conn.commit()
     return inserted
+
+
+def ingest_records(conn, *, account_id, platform, conv, msgs):
+    """Upsert a ConvRecord + insert its MsgRecords (dedup). Returns (conv_id, inserted).
+    Honors conv.muted (a new group can arrive muted); never un-mutes an existing conv."""
+    cid = upsert_conversation(conn, account_id=account_id, platform=platform,
+                              chat_id=conv.chat_id, name=conv.name, type=conv.type,
+                              unread=conv.unread, last_activity_at=conv.last_activity_at)
+    if conv.muted:
+        set_muted(conn, cid, True)
+    inserted = insert_messages(conn, cid, msgs) if msgs else 0
+    return cid, inserted
 
 
 def search_messages(conn, query, *, limit=50, account_id=None):

@@ -260,3 +260,32 @@ def test_reset_store_channel_scope(conn):
     db.reset_store(conn, dry_run=False, platform="wechat")
     plats = [c["platform"] for c in db.get_conversations(conn)]
     assert plats == ["phone"]
+
+
+def test_get_conversation_by_id(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="c1", name="张三")
+    got = db.get_conversation(conn, cid)
+    assert got["chat_id"] == "c1" and got["name"] == "张三"
+    assert db.get_conversation(conn, 99999) is None
+
+
+def test_ingest_records_upserts_conv_and_inserts_msgs(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    conv = ingest.ConvRecord(chat_id="c1", name="张三", type="private",
+                             unread=2, last_activity_at=5000)
+    msgs = [ingest.MsgRecord(msg_key="fullwx:1", ts=4000, content="早", sender="张三"),
+            ingest.MsgRecord(msg_key="fullwx:2", ts=5000, content="晚", sender="张三")]
+    cid, n = db.ingest_records(conn, account_id=1, platform="wechat", conv=conv, msgs=msgs)
+    assert n == 2
+    got = db.get_conversation(conn, cid)
+    assert got["name"] == "张三" and got["unread"] == 2
+    cid2, n2 = db.ingest_records(conn, account_id=1, platform="wechat", conv=conv, msgs=msgs)
+    assert cid2 == cid and n2 == 0
+
+
+def test_ingest_records_mutes_when_conv_muted_true(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    conv = ingest.ConvRecord(chat_id="g1", name="群", type="group", muted=True)
+    cid, _ = db.ingest_records(conn, account_id=1, platform="wechat", conv=conv, msgs=[])
+    assert db.get_conversation(conn, cid)["muted"] == 1
