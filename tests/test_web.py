@@ -110,3 +110,48 @@ def test_api_ingest_round_trips_all_message_fields():
     assert row["is_mentioned"] == 1
     assert row["direction"] == "out" and row["type"] == "post"
     assert row["sender_id"] == "ou_a"
+
+
+def _seed_person(c):
+    db.upsert_person(c, id="lisi", name="李四", category="family",
+                     threshold_days=14, aliases=["小四"])
+    db.upsert_channel(c, person_id="lisi", kind="phone", identifier="+8613000000001")
+    db.upsert_account(c, account_id=1, platform="wechat", self_id="s1")
+    db.upsert_account(c, account_id=2, platform="phone", self_id="s2")
+    wc = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="wxid_x", name="李四")
+    pc = db.upsert_conversation(c, account_id=2, platform="phone", chat_id="13000000001", name="李四电话")
+    db.insert_messages(c, wc, [ingest.MsgRecord(msg_key="w:1", ts=10, content="微信你好", sender="李四")])
+    db.insert_messages(c, pc, [ingest.MsgRecord(msg_key="p:1", ts=20, content="[通话] 95s", sender="李四")])
+    return c, wc, pc
+
+
+def test_api_persons_lists_linked_people():
+    c = db.connect(":memory:"); db.init_db(c); _seed_person(c)
+    db.link_conversations(c)
+    rows = web.api_persons(c)
+    assert any(r["id"] == "lisi" for r in rows)
+
+
+def test_api_person_timeline_merges_channels():
+    c = db.connect(":memory:"); db.init_db(c); _seed_person(c)
+    # link wechat manually (no wxid in person yet), phone auto-links via tail_match
+    db.set_conversation_person(c, db.get_conversations(c, account_id=1)[0]["id"], "lisi")
+    db.link_conversations(c)
+    tl = web.api_person_timeline(c, "lisi")
+    contents = [m["content"] for m in tl]
+    assert "微信你好" in contents and "[通话] 95s" in contents
+    assert [m["ts"] for m in tl] == sorted(m["ts"] for m in tl)   # merged, time-ordered
+
+
+def test_api_link_confirms_and_learns():
+    c = db.connect(":memory:"); db.init_db(c); _seed_person(c)
+    wcid = db.get_conversations(c, account_id=1)[0]["id"]
+    res = web.api_link(c, {"conversation_id": wcid, "person_id": "lisi"})
+    assert res["ok"] is True
+    assert db.get_conversation(c, wcid)["person_id"] == "lisi"
+
+
+def test_api_merge_candidates_present():
+    c = db.connect(":memory:"); db.init_db(c); _seed_person(c)
+    cands = web.api_merge_candidates(c)
+    assert any(s["name"] == "李四" for s in cands)
