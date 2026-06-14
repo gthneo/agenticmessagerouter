@@ -81,6 +81,19 @@ jl push phone --remote http://192.168.31.178:8088 --token <web_token>   # 电话
 - `account_id`:wechat=1、phone=2(8-bit 多账号)。摄取=收集**自己的**数据(非对外发送),与 ignite/poll 同类,不走发送审批门。
 - 飞书(lark-cli)/企微(wecom-cli)适配器复用同一 push 路径(下一批)。Mac 侧可挂 cron/launchd 定时 push。
 
+## 人归一(③ · 跨渠道同一个人）
+
+同一个人散在微信/电话/…的会话,归到一个 person,看**合并时间线**:
+
+```sh
+jl link          # 自动归并(精确/电话 tail_match)+ 打印待人工确认的候选
+```
+
+- **自动**:会话对端标识命中某 person 的 channels → 自动设 `person_id`(电话用 tail_match 容 +86;其他精确)。仅**唯一匹配**才自动并,歧义留给人。
+- **人在回路确认**:名字相似但 ID 不在档的(如微信"Connie" ?= 联系人"王珺熙Connie"),系统出**候选**,Web 收件箱「🔗 待确认归并」一键确认 —— **不黑箱乱并**,确认后**学下这个渠道 ID**(下次自动并,越用越准),留 `link` 审计。
+- **合并视图**:Web「👤 联系人」点一个人 → 跨渠道消息按时间合并;`GET /api/persons` / `/api/persons/{id}/timeline` / `/api/merge-candidates` / `POST /api/link`。
+- **零 LLM**:全确定性,符合 LLM-optional 核心;LLM 匹配将来只作为**额外候选源**接入,不改确认门。
+
 > sweep 现在读**派生 last**（来自已入库的 messages）。在 sub-project B 的摄取/轮询把消息灌进来之前，
 > 全员显示 ⚪（无数据）属正常 —— 这正是"库先建好、摄取后填"的架构。
 
