@@ -94,6 +94,22 @@ CREATE TABLE IF NOT EXISTS media (
 CREATE INDEX IF NOT EXISTS idx_media_message ON media(message_id);
 CREATE INDEX IF NOT EXISTS idx_media_sha ON media(sha256);
 
+-- outbound drafts (human-in-the-loop: queued -> confirmed -> sent). Send only on confirm.
+CREATE TABLE IF NOT EXISTS outbox (
+    id              INTEGER PRIMARY KEY,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    account_id      INTEGER NOT NULL,
+    platform        TEXT NOT NULL,
+    chat_id         TEXT NOT NULL,
+    body            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    created_at      INTEGER NOT NULL,
+    created_by      TEXT NOT NULL DEFAULT '',
+    sent_at         INTEGER,
+    error           TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status, created_at);
+
 -- full-text search (trigram = CJK substring; NOTE: only matches queries >= 3 chars,
 -- so the search layer uses a LIKE fallback for shorter queries)
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
