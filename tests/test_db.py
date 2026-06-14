@@ -23,7 +23,7 @@ def test_init_db_creates_five_tables(conn):
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
     ).fetchall()
     names = {r["name"] for r in rows}
-    assert {"persons", "channels", "interactions", "events", "tokens"} <= names
+    assert {"persons", "channels", "events", "tokens"} <= names
 
 
 def test_upsert_person_is_idempotent(conn):
@@ -61,34 +61,6 @@ def test_upsert_channel_idempotent_on_person_kind_identifier(conn):
     chans = db.get_channels(conn, "u3")
     assert len(chans) == 1
     assert chans[0]["label"] == "王五备注"
-
-
-def test_record_interaction_keeps_latest_per_channel(conn):
-    db.upsert_person(conn, id="u3", name="王五", category="biz",
-                     threshold_days=3, aliases=[])
-    cid = db.upsert_channel(conn, person_id="u3", kind="wechat",
-                            identifier="wxid_test_003", label="")
-    db.record_interaction(conn, channel_id=cid, ts=1000,
-                          direction="in", summary="早")
-    db.record_interaction(conn, channel_id=cid, ts=2000,
-                          direction="out", summary="晚")
-    latest = db.latest_interaction(conn, cid)
-    assert latest["ts"] == 2000
-    assert latest["summary"] == "晚"
-
-
-def test_record_interaction_dedups_same_channel_and_ts(conn):
-    db.upsert_person(conn, id="u3", name="王五", category="biz",
-                     threshold_days=3, aliases=[])
-    cid = db.upsert_channel(conn, person_id="u3", kind="wechat",
-                            identifier="wxid_test_003", label="")
-    # repeated sweeps re-fetch the same last message — must not pile up rows
-    db.record_interaction(conn, channel_id=cid, ts=2000, direction="in", summary="hi")
-    db.record_interaction(conn, channel_id=cid, ts=2000, direction="in", summary="hi")
-    n = conn.execute(
-        "SELECT COUNT(*) AS n FROM interactions WHERE channel_id=?", (cid,)
-    ).fetchone()["n"]
-    assert n == 1
 
 
 def test_log_event_appends_audit_trail(conn):

@@ -183,3 +183,36 @@ def test_search_messages_query_with_quote_does_not_crash(conn):
     ])
     hits = db.search_messages(conn, '"明天签约"')
     assert len(hits) == 1
+
+
+def test_derive_last_interactions_latest_per_platform(conn):
+    db.upsert_person(conn, id="u1", name="张三", category="biz",
+                     threshold_days=3, aliases=[])
+    # wechat conversation linked to u1
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="wxid_self_1")
+    wc = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                chat_id="c1", name="张三", type="private")
+    db.link_person(conn, wc, "u1")
+    db.insert_messages(conn, wc, [
+        ingest.MsgRecord(msg_key="w:1", ts=1000, content="早", sender="张三"),
+        ingest.MsgRecord(msg_key="w:2", ts=3000, content="晚", sender="张三"),
+    ])
+    # phone conversation linked to u1
+    db.upsert_account(conn, account_id=2, platform="phone", self_id="me_phone")
+    pc = db.upsert_conversation(conn, account_id=2, platform="phone",
+                                chat_id="+8613000000001", type="private")
+    db.link_person(conn, pc, "u1")
+    db.insert_messages(conn, pc, [
+        ingest.MsgRecord(msg_key="p:1", ts=2000, content="call", sender="张三"),
+    ])
+
+    out = db.derive_last_interactions(conn, "u1")
+    assert out["wechat"]["ts"] == 3000
+    assert out["wechat"]["summary"] == "晚"
+    assert out["phone"]["ts"] == 2000
+
+
+def test_derive_last_interactions_empty_for_unlinked(conn):
+    db.upsert_person(conn, id="u9", name="无会话", category="x",
+                     threshold_days=3, aliases=[])
+    assert db.derive_last_interactions(conn, "u9") == {}

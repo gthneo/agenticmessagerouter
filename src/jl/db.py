@@ -265,24 +265,28 @@ def search_messages(conn, query, *, limit=50, account_id=None):
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
 
-# ----- interactions ---------------------------------------------------------
+# ----- derived last-interaction (replaces the interactions table) -----------
 
-def record_interaction(conn, *, channel_id, ts, direction="", summary=""):
-    conn.execute(
-        """INSERT OR IGNORE INTO interactions
-               (channel_id, ts, direction, summary, recorded_at)
-           VALUES (?, ?, ?, ?, ?)""",
-        (channel_id, ts, direction, summary, _now()),
-    )
-    conn.commit()
-
-
-def latest_interaction(conn, channel_id):
-    row = conn.execute(
-        "SELECT * FROM interactions WHERE channel_id=? ORDER BY ts DESC LIMIT 1",
-        (channel_id,),
-    ).fetchone()
-    return dict(row) if row else None
+def derive_last_interactions(conn, person_id):
+    """Latest message per platform across all conversations linked to a person.
+    Returns {platform: {"ts": int, "summary": str}}."""
+    rows = conn.execute(
+        """
+        SELECT m.platform, m.ts, m.sender, m.content
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE c.person_id = ?
+        ORDER BY m.platform, m.ts DESC
+        """,
+        (person_id,),
+    ).fetchall()
+    out = {}
+    for r in rows:
+        if r["platform"] in out:
+            continue  # rows are ts-desc within platform → first seen is newest
+        summary = r["content"] or ""
+        out[r["platform"]] = {"ts": r["ts"], "summary": summary}
+    return out
 
 
 # ----- events (audit trail) -------------------------------------------------
