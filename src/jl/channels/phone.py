@@ -11,6 +11,8 @@ import re
 import sqlite3
 import time
 
+from .. import ingest
+
 ABROOT = os.path.expanduser("~/Library/Application Support/AddressBook")
 CALLDB = os.path.expanduser(
     "~/Library/Application Support/CallHistoryDB/CallHistory.storedata")
@@ -95,3 +97,64 @@ def resolve_contact(phone):
         except Exception:
             pass
     return "/".join(sorted(hits)) if hits else ""
+
+
+def map_call(row):
+    """One CallHistory row -> MsgRecord."""
+    ts = int(row["ZDATE"]) + APPLE_OFFSET
+    out = bool(row.get("ZORIGINATED"))
+    dur = int(row.get("ZDURATION") or 0)
+    if dur >= 1:
+        body = f"[通话] {dur}s {'拨出' if out else '接听'}"
+    else:
+        body = "[通话] 未接通" if out else "[通话] 未接"
+    return ingest.MsgRecord(
+        msg_key=f"phone:{row['Z_PK']}",
+        ts=ts,
+        content=body,
+        sender="me" if out else (row.get("ZADDRESS") or ""),
+        sender_id=row.get("ZADDRESS") or "",
+        direction="out" if out else "in",
+        type="call",
+        raw={k: row.get(k) for k in ("Z_PK", "ZADDRESS", "ZDATE", "ZDURATION", "ZORIGINATED")},
+    )
+
+
+def conversations_from_calls(rows, name_resolver=resolve_contact):
+    """Group call rows by number into [(ConvRecord, [MsgRecord])]."""
+    groups = {}
+    for r in rows:
+        num = r.get("ZADDRESS") or ""
+        groups.setdefault(num, []).append(r)
+    out = []
+    for num, grp in groups.items():
+        msgs = [map_call(r) for r in grp]
+        last_ts = max((m.ts for m in msgs), default=None)
+        conv = ingest.ConvRecord(chat_id=num, name=name_resolver(num) or "",
+                                 type="private", last_activity_at=last_ts)
+        out.append((conv, msgs))
+    return out
+
+
+class PhoneAdapter(ingest.IngestAdapter):
+    platform = "phone"
+
+    def _rows(self, limit):
+        conn = sqlite3.connect(f"file:{CALLDB}?mode=ro", uri=True, timeout=3)
+        try:
+            cur = conn.execute(
+                """SELECT Z_PK, ZADDRESS, ZDATE, ZDURATION, ZORIGINATED
+                   FROM ZCALLRECORD ORDER BY ZDATE DESC LIMIT ?""", (limit,))
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    def list_conversations(self, account, **kw):
+        return [c for c, _ in conversations_from_calls(self._rows(2000))]
+
+    def backfill(self, account, conv, cursor):
+        return [], ""
+
+    def pull_new(self, account, recent_limit=500):
+        return conversations_from_calls(self._rows(recent_limit))
