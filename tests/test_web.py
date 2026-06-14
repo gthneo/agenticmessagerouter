@@ -155,3 +155,61 @@ def test_api_merge_candidates_present():
     c = db.connect(":memory:"); db.init_db(c); _seed_person(c)
     cands = web.api_merge_candidates(c)
     assert any(s["name"] == "李四" for s in cands)
+
+
+def _ob_conv(c):
+    db.upsert_account(c, account_id=1, platform="wechat", self_id="s")
+    return db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="wxid_t", name="张三")
+
+
+def _stub_wechat_sender(monkeypatch, result, record=None):
+    from jl import send
+    def _send(chat_id, body):
+        if record is not None:
+            record.append((chat_id, body))
+        return result
+    monkeypatch.setitem(send.SENDERS, "wechat", _send)
+
+
+def test_api_queue_outbox_creates_pending_preview():
+    c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
+    res = web.api_queue_outbox(c, {"conversation_id": cid, "body": "你好"})
+    assert res["status"] == "pending" and res["body"] == "你好" and res["id"]
+    assert db.get_outbox(c, status="pending")[0]["chat_id"] == "wxid_t"
+
+
+def test_api_confirm_outbox_sends_and_marks(monkeypatch):
+    c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
+    rec = []
+    _stub_wechat_sender(monkeypatch, (True, ""), rec)
+    oid = web.api_queue_outbox(c, {"conversation_id": cid, "body": "hi"})["id"]
+    res = web.api_confirm_outbox(c, {"id": oid})
+    assert res["ok"] is True
+    assert rec == [("wxid_t", "hi")]
+    assert db.get_outbox_row(c, oid)["status"] == "sent"
+    assert "send" in [e["kind"] for e in db.get_events(c)]
+
+
+def test_api_confirm_outbox_send_failure_marks_failed(monkeypatch):
+    c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
+    _stub_wechat_sender(monkeypatch, (False, "offline"))
+    oid = web.api_queue_outbox(c, {"conversation_id": cid, "body": "hi"})["id"]
+    res = web.api_confirm_outbox(c, {"id": oid})
+    assert res["ok"] is False
+    assert db.get_outbox_row(c, oid)["status"] == "failed"
+
+
+def test_api_confirm_outbox_rejects_nonpending():
+    c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
+    oid = web.api_queue_outbox(c, {"conversation_id": cid, "body": "hi"})["id"]
+    db.mark_outbox(c, oid, "sent")
+    res = web.api_confirm_outbox(c, {"id": oid})
+    assert res["ok"] is False   # already sent -> not re-sendable
+
+
+def test_api_cancel_outbox():
+    c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
+    oid = web.api_queue_outbox(c, {"conversation_id": cid, "body": "hi"})["id"]
+    web.api_cancel_outbox(c, {"id": oid})
+    assert db.get_outbox_row(c, oid)["status"] == "canceled"
+    assert db.get_outbox(c, status="pending") == []

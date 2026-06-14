@@ -87,6 +87,34 @@ def api_link(conn, payload):
     return {"ok": True}
 
 
+def api_queue_outbox(conn, payload):
+    oid = db.queue_outbox(conn, conversation_id=int(payload["conversation_id"]),
+                          body=payload["body"], actor=payload.get("actor", "user"))
+    return db.get_outbox_row(conn, oid)
+
+
+def api_list_outbox(conn):
+    return db.get_outbox(conn, status="pending")
+
+
+def api_confirm_outbox(conn, payload):
+    from . import send
+    row = db.get_outbox_row(conn, int(payload["id"]))
+    if row is None or row["status"] != "pending":
+        return {"ok": False, "error": "not a pending outbox item"}
+    ok, err = send.send_message(row["platform"], row["chat_id"], row["body"])
+    db.mark_outbox(conn, row["id"], "sent" if ok else "failed", error=err)
+    db.log_event(conn, kind="send", actor=payload.get("actor", "user"),
+                 detail={"outbox_id": row["id"], "platform": row["platform"],
+                         "chat_id": row["chat_id"], "ok": ok, "error": err})
+    return {"ok": ok, "error": err}
+
+
+def api_cancel_outbox(conn, payload):
+    db.mark_outbox(conn, int(payload["id"]), "canceled")
+    return {"ok": True}
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -130,6 +158,8 @@ def make_handler(db_path):
                     return self._send(200, api_person_timeline(conn, unquote(u.path.split("/")[3])))
                 if u.path == "/api/merge-candidates":
                     return self._send(200, api_merge_candidates(conn))
+                if u.path == "/api/outbox":
+                    return self._send(200, api_list_outbox(conn))
                 return self._send(404, {"error": "not found"})
             finally:
                 conn.close()
@@ -139,7 +169,8 @@ def make_handler(db_path):
             params = {k: v[0] for k, v in parse_qs(u.query).items()}
             if not _auth_ok(self.headers, params):
                 return self._send(401, {"error": "unauthorized"})
-            if u.path not in ("/api/ingest", "/api/link"):
+            if u.path not in ("/api/ingest", "/api/link", "/api/outbox",
+                              "/api/outbox/confirm", "/api/outbox/cancel"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -150,7 +181,13 @@ def make_handler(db_path):
             try:
                 if u.path == "/api/ingest":
                     return self._send(200, api_ingest(conn, payload))
-                return self._send(200, api_link(conn, payload))
+                if u.path == "/api/link":
+                    return self._send(200, api_link(conn, payload))
+                if u.path == "/api/outbox":
+                    return self._send(200, api_queue_outbox(conn, payload))
+                if u.path == "/api/outbox/confirm":
+                    return self._send(200, api_confirm_outbox(conn, payload))
+                return self._send(200, api_cancel_outbox(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
             finally:
@@ -183,13 +220,22 @@ INDEX_HTML = """<!doctype html><html lang=zh><head><meta charset=utf-8>
 #hdr{padding:8px 12px;border-bottom:1px solid #ddd;display:flex;gap:8px;align-items:center}
 #msgs{flex:1;overflow:auto;padding:12px}.m{margin:6px 0}.m .s{font-weight:600;color:#333}.m .t{color:#aaa;font-size:11px;margin-left:6px}
 input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
+.ob{padding:8px 12px;border-bottom:1px solid #eee}.ob .p{color:#888;font-size:12px}.ob .b{margin:3px 0}
+.ob button{margin:4px 6px 0 0;padding:3px 10px;border-radius:6px;cursor:pointer;border:1px solid #ccc;background:#f7f7f7}
+.ob .send{border-color:#4a8;background:#e8f7ee;color:#176}.ob .send:hover{background:#d4f0e0}
+#replybox{border-top:1px solid #ddd;padding:8px 12px;display:flex;gap:8px;align-items:flex-start}
+#replybox textarea{flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font:inherit;resize:vertical}
+#replybox button{padding:6px 12px;border:1px solid #48a;background:#e8f0fb;color:#147;border-radius:6px;cursor:pointer;white-space:nowrap}
 </style></head><body>
 <div id=side>
  <div class=sec>👤 联系人</div><div id=persons></div>
+ <div class=sec>📤 待发送 outbox</div><div id=outbox></div>
  <div class=sec>🔗 待确认归并</div><div id=cands></div>
  <div class=sec>💬 会话</div>
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
-<div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button><b id=title>选择会话</b></div><div id=msgs></div></div>
+<div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button><b id=title>选择会话</b></div><div id=msgs></div>
+ <div id=replybox><textarea id=reply rows=2 placeholder="草拟回复…（确认后才会发送）"></textarea>
+ <button onclick="draft()">草拟回复 → outbox</button></div></div>
 <script>
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
@@ -199,9 +245,20 @@ function fmt(ts){return ts?new Date(ts*1000).toLocaleString('zh-CN'):''}
 async function loadConvs(){const c=await E('/conversations');document.getElementById('list').innerHTML=
  c.map(x=>`<div class=conv onclick="openConv(${x.id})"><div class=n>${esc(x.name||x.chat_id)}</div>
  <div class=p>${esc(x.platform)} · ${fmt(x.last_activity_at)}</div></div>`).join('')}
-async function openConv(id){const m=await E('/conversations/'+id+'/messages');
+async function openConv(id){window.CURCONV=id;const m=await E('/conversations/'+id+'/messages');
  document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
  <span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)'}
+async function draft(){if(!window.CURCONV){alert('先选会话');return}
+ const ta=document.getElementById('reply'),body=ta.value.trim();if(!body)return;
+ await P('/outbox',{conversation_id:window.CURCONV,body});ta.value='';loadOutbox()}
+async function loadOutbox(){const o=await E('/outbox');document.getElementById('outbox').innerHTML=
+ o.map(x=>`<div class=ob><div class=p>→ ${esc(x.chat_id)} <span class=badge>${esc(x.platform)}</span></div>
+ <div class=b>${esc(x.body)}</div>
+ <button class=send onclick="confirmOutbox(${x.id})">✅ 确认发送</button>
+ <button onclick="cancelOutbox(${x.id})">✕ 取消</button></div>`).join('')||'<div class=p style=padding:8px>(无待发送)</div>'}
+async function confirmOutbox(id){const r=await P('/outbox/confirm',{id});
+ alert(r.ok?'已发送 ✅':'发送失败：'+(r.error||'未知'));loadOutbox()}
+async function cancelOutbox(id){await P('/outbox/cancel',{id});loadOutbox()}
 async function loadPersons(){const ps=await E('/persons');document.getElementById('persons').innerHTML=
  ps.map(p=>`<div class=conv onclick="openPerson('${esc(p.id)}',this)"><div class=n>${esc(p.name||p.id)}
  ${(p.channels||[]).map(ch=>`<span class=badge>${esc(ch)}</span>`).join('')}</div>
@@ -216,12 +273,12 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
  <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`).join('')}
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
 function goHome(){document.getElementById('title').textContent='选择会话';
- document.getElementById('msgs').innerHTML='';loadPersons();loadCands();loadConvs()}
+ document.getElementById('msgs').innerHTML='';loadPersons();loadCands();loadConvs();loadOutbox()}
 async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
  goHome()}
 document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='Enter')return;
  const h=await E('/search','q='+encodeURIComponent(e.target.value));
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
-loadPersons();loadCands();loadConvs()
+loadPersons();loadCands();loadConvs();loadOutbox()
 </script></body></html>"""
