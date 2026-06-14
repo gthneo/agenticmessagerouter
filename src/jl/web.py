@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import db
+from . import ingest
 
 
 def api_conversations(conn, params):
@@ -33,6 +34,34 @@ def api_search(conn, query, limit=50):
     if not q:
         return []
     return db.search_messages(conn, q, limit=limit)
+
+
+def api_ingest(conn, payload):
+    """Ingest a pushed batch from an edge collector. Idempotent (dedup on msg_key).
+    payload = {"account": {account_id, platform, label?, self_id?, host?},
+               "conversations": [{"conv": {ConvRecord fields}, "msgs": [{MsgRecord fields}]}]}"""
+    acct = payload["account"]
+    db.upsert_account(conn, account_id=acct["account_id"], platform=acct["platform"],
+                      label=acct.get("label", ""), self_id=acct.get("self_id", ""),
+                      host=acct.get("host", ""))
+    n_conv = n_msg = 0
+    for item in payload.get("conversations", []):
+        cv = item["conv"]
+        conv = ingest.ConvRecord(
+            chat_id=cv["chat_id"], name=cv.get("name", ""),
+            type=cv.get("type", "private"), muted=cv.get("muted", False),
+            unread=cv.get("unread", 0), last_activity_at=cv.get("last_activity_at"))
+        msgs = [ingest.MsgRecord(
+            msg_key=m["msg_key"], ts=m["ts"], content=m.get("content", ""),
+            sender=m.get("sender", ""), sender_id=m.get("sender_id", ""),
+            direction=m.get("direction", "in"), type=m.get("type", "text"),
+            is_mentioned=m.get("is_mentioned", False), raw=m.get("raw", {}))
+            for m in item.get("msgs", [])]
+        _, ins = db.ingest_records(conn, account_id=acct["account_id"],
+                                   platform=acct["platform"], conv=conv, msgs=msgs)
+        n_conv += 1
+        n_msg += ins
+    return {"accounts": 1, "conversations": n_conv, "messages": n_msg}
 
 
 def _auth_ok(headers, params):
@@ -73,6 +102,26 @@ def make_handler(db_path):
                 if u.path == "/api/search":
                     return self._send(200, api_search(conn, params.get("q", "")))
                 return self._send(404, {"error": "not found"})
+            finally:
+                conn.close()
+
+        def do_POST(self):
+            u = urlparse(self.path)
+            params = {k: v[0] for k, v in parse_qs(u.query).items()}
+            if not _auth_ok(self.headers, params):
+                return self._send(401, {"error": "unauthorized"})
+            if u.path != "/api/ingest":
+                return self._send(404, {"error": "not found"})
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except ValueError:
+                return self._send(400, {"error": "bad json"})
+            conn = db.connect(db_path)
+            try:
+                return self._send(200, api_ingest(conn, payload))
+            except (KeyError, TypeError) as e:
+                return self._send(400, {"error": f"bad payload: {e}"})
             finally:
                 conn.close()
 

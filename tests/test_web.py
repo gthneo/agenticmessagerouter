@@ -58,3 +58,35 @@ def test_api_messages_bad_id_path_is_404(monkeypatch):
         assert False, "expected HTTPError"
     except urllib.error.HTTPError as e:
         assert e.code == 404
+
+
+def test_api_ingest_creates_account_conv_and_messages():
+    c = db.connect(":memory:"); db.init_db(c)
+    payload = {
+        "account": {"account_id": 2, "platform": "phone", "label": "iPhone"},
+        "conversations": [
+            {"conv": {"chat_id": "+8613000000001", "name": "张三", "type": "private",
+                      "unread": 0, "last_activity_at": 100, "muted": False},
+             "msgs": [{"msg_key": "phone:1", "ts": 100, "content": "[通话] 30s",
+                       "sender": "张三", "direction": "in", "type": "call"}]},
+        ],
+    }
+    res = web.api_ingest(c, payload)
+    assert res["accounts"] == 1 and res["conversations"] == 1 and res["messages"] == 1
+    convs = db.get_conversations(c)
+    assert convs[0]["chat_id"] == "+8613000000001"
+    assert convs[0]["platform"] == "phone"
+
+
+def test_api_ingest_is_idempotent():
+    c = db.connect(":memory:"); db.init_db(c)
+    payload = {
+        "account": {"account_id": 2, "platform": "phone"},
+        "conversations": [
+            {"conv": {"chat_id": "p1", "name": "X", "type": "private"},
+             "msgs": [{"msg_key": "phone:1", "ts": 1, "content": "hi"}]},
+        ],
+    }
+    web.api_ingest(c, payload)
+    r2 = web.api_ingest(c, payload)
+    assert r2["messages"] == 0
