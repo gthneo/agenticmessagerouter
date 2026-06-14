@@ -102,7 +102,8 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 <div id=side><div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
 <div id=main><div id=hdr><b id=title>选择会话</b></div><div id=msgs></div></div>
 <script>
-const E=(s,p='')=>fetch('/api'+s+(p?'?'+p:'')).then(r=>r.json());
+const TOK=new URLSearchParams(location.search).get('token')||'';
+const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function fmt(ts){return ts?new Date(ts*1000).toLocaleString('zh-CN'):''}
 async function loadConvs(){const c=await E('/conversations');document.getElementById('list').innerHTML=
