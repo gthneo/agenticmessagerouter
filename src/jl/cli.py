@@ -67,6 +67,8 @@ def route(args):
             "remote": _opt_value(args, "--remote") or "http://192.168.31.178:8088",
             "token": _opt_value(args, "--token") or "",
         })
+    if a == "link":
+        return ("link", {})
     return ("detail", {"name": a})
 
 
@@ -237,6 +239,17 @@ def cmd_push(conn, ctx):
     print(f"✅ push {ch}: {nconv} 会话 → {ctx['remote']}  入库 {res.get('messages')} 条新消息")
 
 
+def cmd_link(conn, ctx):
+    n = db.link_conversations(conn)
+    sugg = db.suggest_merges(conn)
+    print(f"🔗 自动归并 {n} 个会话到已知联系人。")
+    if sugg:
+        print(f"\n⚠️ {len(sugg)} 个待人工确认 (名字相似, 不自动并 — 去 Web 收件箱确认):")
+        for s in sugg[:10]:
+            cand = "/".join(p["name"] for p in s["candidates"])
+            print(f"  • [{s['platform']}] {s['name']}  ?= {cand}")
+
+
 # ----- helpers --------------------------------------------------------------
 
 def _find_person(conn, name):
@@ -291,6 +304,8 @@ def main(argv=None):
         ctx.update(params); cmd_web(conn, ctx)
     elif command == "push":
         ctx.update(params); cmd_push(conn, ctx)
+    elif command == "link":
+        cmd_link(conn, ctx)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()
