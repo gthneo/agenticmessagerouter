@@ -162,3 +162,7 @@ def test_route_push():
 def test_route_push_defaults_channel_phone():
     cmd, params = cli.route(["push"])
     assert cmd == "push" and params["channel"] == "phone"
+
+
+def test_route_link():
+    assert cli.route(["link"]) == ("link", {})

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 from . import db
 from . import ingest
@@ -65,6 +65,28 @@ def api_ingest(conn, payload):
     return {"accounts": 1, "conversations": n_conv, "messages": n_msg}
 
 
+def api_persons(conn):
+    return db.persons_overview(conn)
+
+
+def api_person_timeline(conn, person_id, limit=500):
+    rows = conn.execute(
+        """SELECT m.* FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+           WHERE c.person_id = ? ORDER BY m.ts ASC LIMIT ?""",
+        (person_id, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def api_merge_candidates(conn):
+    return db.suggest_merges(conn)
+
+
+def api_link(conn, payload):
+    db.set_conversation_person(conn, int(payload["conversation_id"]), payload["person_id"])
+    return {"ok": True}
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -102,6 +124,12 @@ def make_handler(db_path):
                     return self._send(200, api_messages(conn, cid))
                 if u.path == "/api/search":
                     return self._send(200, api_search(conn, params.get("q", "")))
+                if u.path == "/api/persons":
+                    return self._send(200, api_persons(conn))
+                if u.path.startswith("/api/persons/") and u.path.endswith("/timeline"):
+                    return self._send(200, api_person_timeline(conn, unquote(u.path.split("/")[3])))
+                if u.path == "/api/merge-candidates":
+                    return self._send(200, api_merge_candidates(conn))
                 return self._send(404, {"error": "not found"})
             finally:
                 conn.close()
@@ -111,7 +139,7 @@ def make_handler(db_path):
             params = {k: v[0] for k, v in parse_qs(u.query).items()}
             if not _auth_ok(self.headers, params):
                 return self._send(401, {"error": "unauthorized"})
-            if u.path != "/api/ingest":
+            if u.path not in ("/api/ingest", "/api/link"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -120,7 +148,9 @@ def make_handler(db_path):
                 return self._send(400, {"error": "bad json"})
             conn = db.connect(db_path)
             try:
-                return self._send(200, api_ingest(conn, payload))
+                if u.path == "/api/ingest":
+                    return self._send(200, api_ingest(conn, payload))
+                return self._send(200, api_link(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
             finally:
@@ -145,15 +175,25 @@ INDEX_HTML = """<!doctype html><html lang=zh><head><meta charset=utf-8>
 #side{width:300px;border-right:1px solid #ddd;overflow:auto}#main{flex:1;display:flex;flex-direction:column}
 .conv{padding:8px 12px;border-bottom:1px solid #eee;cursor:pointer}.conv:hover{background:#f5f5f5}
 .conv .n{font-weight:600}.conv .p{color:#888;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sec{padding:6px 10px;font-weight:600;background:#fafafa;border-bottom:1px solid #eee;color:#555;font-size:13px}
+.badge{display:inline-block;padding:1px 6px;margin-left:4px;border-radius:8px;background:#eef;color:#446;font-size:11px}
+.cand{padding:8px 12px;border-bottom:1px solid #eee}.cand .p{color:#888;font-size:12px}
+.cand button{margin-top:4px;padding:3px 10px;border:1px solid #4a8;background:#e8f7ee;color:#176;border-radius:6px;cursor:pointer}
+.cand button:hover{background:#d4f0e0}
 #hdr{padding:8px 12px;border-bottom:1px solid #ddd;display:flex;gap:8px;align-items:center}
 #msgs{flex:1;overflow:auto;padding:12px}.m{margin:6px 0}.m .s{font-weight:600;color:#333}.m .t{color:#aaa;font-size:11px;margin-left:6px}
 input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 </style></head><body>
-<div id=side><div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
+<div id=side>
+ <div class=sec>👤 联系人</div><div id=persons></div>
+ <div class=sec>🔗 待确认归并</div><div id=cands></div>
+ <div class=sec>💬 会话</div>
+ <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
 <div id=main><div id=hdr><b id=title>选择会话</b></div><div id=msgs></div></div>
 <script>
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
+const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetch('/api'+s+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())};
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function fmt(ts){return ts?new Date(ts*1000).toLocaleString('zh-CN'):''}
 async function loadConvs(){const c=await E('/conversations');document.getElementById('list').innerHTML=
@@ -162,9 +202,24 @@ async function loadConvs(){const c=await E('/conversations');document.getElement
 async function openConv(id){const m=await E('/conversations/'+id+'/messages');
  document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
  <span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)'}
+async function loadPersons(){const ps=await E('/persons');document.getElementById('persons').innerHTML=
+ ps.map(p=>`<div class=conv onclick="openPerson('${esc(p.id)}',this)"><div class=n>${esc(p.name||p.id)}
+ ${(p.channels||[]).map(ch=>`<span class=badge>${esc(ch)}</span>`).join('')}</div>
+ <div class=p>${p.conversations} 个会话 · ${fmt(p.last_activity_at)}</div></div>`).join('')||'<div class=p style=padding:8px>(暂无已归并联系人)</div>'}
+async function openPerson(id){const m=await E('/persons/'+encodeURIComponent(id)+'/timeline');
+ document.getElementById('title').textContent='👤 '+id+' 合并时间线';
+ document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
+ <span class=badge>${esc(x.platform)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)'}
+async function loadCands(){const cs=await E('/merge-candidates');document.getElementById('cands').innerHTML=
+ cs.map(c=>`<div class=cand><div class=n>${esc(c.name)} <span class=badge>${esc(c.platform)}</span></div>
+ ${c.candidates.map(p=>`<div class=p>→ ${esc(p.name||p.id)}</div>
+ <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`).join('')}
+ </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
+async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
+ loadPersons();loadCands();loadConvs()}
 document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='Enter')return;
  const h=await E('/search','q='+encodeURIComponent(e.target.value));
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
-loadConvs()
+loadPersons();loadCands();loadConvs()
 </script></body></html>"""

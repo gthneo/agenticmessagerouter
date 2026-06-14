@@ -10,6 +10,16 @@ the right handler (agent / human / pipeline).
   silent fire-and-forget. Every human intervention leaves a trace (who / when / why).
 - **Conservative when unsure** — hand the decision back to the human rather than guessing.
 - Keep routing decisions **explainable and logged**, not black-box.
+- **LLM-optional core (王总 2026-06-14 钦定).** Every human-communication capability —
+  read, search, browse, reply, send — MUST work with zero LLM. The LLM is an optional
+  *assist* layer (draft suggestions, summaries, auto-routing, merge candidates, ASR,
+  semantic search), never a *gate*: if every model is unreachable, the human stays fully
+  in the loop and can still communicate. LLM features degrade gracefully to manual.
+  This is human-in-the-loop taken to its end — the human can operate without any AI.
+- **Multi-LLM behind a thin abstraction.** When AI assist is introduced, it goes through
+  a provider-agnostic `llm` layer + a router that picks by task / cost / availability
+  (Claude API primary; local Ollama for cheap/offline fallback). No feature hard-codes a
+  single provider.
 
 ## Status
 

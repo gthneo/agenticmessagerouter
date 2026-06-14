@@ -289,3 +289,69 @@ def test_ingest_records_mutes_when_conv_muted_true(conn):
     conv = ingest.ConvRecord(chat_id="g1", name="群", type="group", muted=True)
     cid, _ = db.ingest_records(conn, account_id=1, platform="wechat", conv=conv, msgs=[])
     assert db.get_conversation(conn, cid)["muted"] == 1
+
+
+def test_link_conversations_exact_and_tailmatch(conn):
+    db.upsert_person(conn, id="lisi", name="李四", category="family",
+                     threshold_days=14, aliases=["小四", "阿四"])
+    db.upsert_channel(conn, person_id="lisi", kind="wechat", identifier="wxid_test_lisi")
+    db.upsert_channel(conn, person_id="lisi", kind="phone", identifier="+8613000000001")
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s1")
+    db.upsert_account(conn, account_id=2, platform="phone", self_id="s2")
+    wc = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                chat_id="wxid_test_lisi", name="李四")
+    pc = db.upsert_conversation(conn, account_id=2, platform="phone",
+                                chat_id="13000000001", name="李四电话")
+    other = db.upsert_conversation(conn, account_id=2, platform="phone",
+                                   chat_id="95720", name="95720")
+    n = db.link_conversations(conn)
+    assert n == 2
+    assert db.get_conversation(conn, wc)["person_id"] == "lisi"
+    assert db.get_conversation(conn, pc)["person_id"] == "lisi"
+    assert db.get_conversation(conn, other)["person_id"] is None
+
+
+def test_link_conversations_skips_ambiguous(conn):
+    db.upsert_person(conn, id="a", name="A", category="x", threshold_days=7, aliases=[])
+    db.upsert_person(conn, id="b", name="B", category="x", threshold_days=7, aliases=[])
+    db.upsert_channel(conn, person_id="a", kind="phone", identifier="+8613000000001")
+    db.upsert_channel(conn, person_id="b", kind="phone", identifier="+8613000000001")
+    db.upsert_account(conn, account_id=2, platform="phone", self_id="s")
+    c = db.upsert_conversation(conn, account_id=2, platform="phone", chat_id="13000000001", name="?")
+    db.link_conversations(conn)
+    assert db.get_conversation(conn, c)["person_id"] is None
+
+
+def test_set_conversation_person_learns_channel(conn):
+    db.upsert_person(conn, id="lisi", name="李四", category="x", threshold_days=14, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    wc = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                chat_id="wxid_new", name="李四")
+    db.set_conversation_person(conn, wc, "lisi")
+    assert db.get_conversation(conn, wc)["person_id"] == "lisi"
+    kinds = {(c["kind"], c["identifier"]) for c in db.get_channels(conn, "lisi")}
+    assert ("wechat", "wxid_new") in kinds
+
+
+def test_suggest_merges_by_name(conn):
+    db.upsert_person(conn, id="lisi", name="李四", category="x",
+                     threshold_days=14, aliases=["小四"])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    wc = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                chat_id="wxid_x", name="李四")
+    sugg = db.suggest_merges(conn)
+    assert any(s["conversation_id"] == wc and "lisi" in [p["id"] for p in s["candidates"]]
+               for s in sugg)
+
+
+def test_persons_overview_only_lists_persons_with_convs(conn):
+    db.upsert_person(conn, id="lisi", name="李四", category="x", threshold_days=14, aliases=[])
+    db.upsert_person(conn, id="nobody", name="无会话", category="x", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    wc = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="w1", name="李四")
+    db.link_person(conn, wc, "lisi")
+    ov = db.persons_overview(conn)
+    ids = [p["id"] for p in ov]
+    assert "lisi" in ids and "nobody" not in ids
+    p = [x for x in ov if x["id"] == "lisi"][0]
+    assert p["conversations"] == 1 and "wechat" in p["channels"]
