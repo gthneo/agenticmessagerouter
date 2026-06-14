@@ -90,3 +90,23 @@ def test_api_ingest_is_idempotent():
     web.api_ingest(c, payload)
     r2 = web.api_ingest(c, payload)
     assert r2["messages"] == 0
+
+
+def test_api_ingest_round_trips_all_message_fields():
+    c = db.connect(":memory:"); db.init_db(c)
+    payload = {
+        "account": {"account_id": 3, "platform": "feishu"},
+        "conversations": [
+            {"conv": {"chat_id": "oc1", "name": "群X", "type": "group",
+                      "muted": True, "unread": 5, "last_activity_at": 9},
+             "msgs": [{"msg_key": "lark:1", "ts": 9, "content": "见附件",
+                       "sender": "张三", "sender_id": "ou_a", "direction": "out",
+                       "type": "post", "media_ref": "file_abc", "is_mentioned": True}]},
+        ],
+    }
+    web.api_ingest(c, payload)
+    row = c.execute("SELECT * FROM messages WHERE msg_key='lark:1'").fetchone()
+    assert row["media_ref"] == "file_abc"
+    assert row["is_mentioned"] == 1
+    assert row["direction"] == "out" and row["type"] == "post"
+    assert row["sender_id"] == "ou_a"

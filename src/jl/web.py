@@ -55,6 +55,7 @@ def api_ingest(conn, payload):
             msg_key=m["msg_key"], ts=m["ts"], content=m.get("content", ""),
             sender=m.get("sender", ""), sender_id=m.get("sender_id", ""),
             direction=m.get("direction", "in"), type=m.get("type", "text"),
+            media_ref=m.get("media_ref", ""),
             is_mentioned=m.get("is_mentioned", False), raw=m.get("raw", {}))
             for m in item.get("msgs", [])]
         _, ins = db.ingest_records(conn, account_id=acct["account_id"],
