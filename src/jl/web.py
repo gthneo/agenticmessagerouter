@@ -111,7 +111,10 @@ def api_confirm_outbox(conn, payload):
 
 
 def api_cancel_outbox(conn, payload):
-    db.mark_outbox(conn, int(payload["id"]), "canceled")
+    oid = int(payload["id"])
+    db.mark_outbox(conn, oid, "canceled")
+    db.log_event(conn, kind="outbox_cancel", actor=payload.get("actor", "user"),
+                 detail={"outbox_id": oid})
     return {"ok": True}
 
 
