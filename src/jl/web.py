@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 from . import db
 from . import ingest
@@ -127,7 +127,7 @@ def make_handler(db_path):
                 if u.path == "/api/persons":
                     return self._send(200, api_persons(conn))
                 if u.path.startswith("/api/persons/") and u.path.endswith("/timeline"):
-                    return self._send(200, api_person_timeline(conn, u.path.split("/")[3]))
+                    return self._send(200, api_person_timeline(conn, unquote(u.path.split("/")[3])))
                 if u.path == "/api/merge-candidates":
                     return self._send(200, api_merge_candidates(conn))
                 return self._send(404, {"error": "not found"})
