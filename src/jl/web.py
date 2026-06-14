@@ -189,7 +189,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  <div class=sec>🔗 待确认归并</div><div id=cands></div>
  <div class=sec>💬 会话</div>
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
-<div id=main><div id=hdr><b id=title>选择会话</b></div><div id=msgs></div></div>
+<div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button><b id=title>选择会话</b></div><div id=msgs></div></div>
 <script>
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
@@ -215,8 +215,10 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
  ${c.candidates.map(p=>`<div class=p>→ ${esc(p.name||p.id)}</div>
  <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`).join('')}
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
+function goHome(){document.getElementById('title').textContent='选择会话';
+ document.getElementById('msgs').innerHTML='';loadPersons();loadCands();loadConvs()}
 async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
- loadPersons();loadCands();loadConvs()}
+ goHome()}
 document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='Enter')return;
  const h=await E('/search','q='+encodeURIComponent(e.target.value));
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
