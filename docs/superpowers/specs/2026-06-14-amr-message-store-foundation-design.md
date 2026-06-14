@@ -161,9 +161,9 @@ CREATE INDEX IF NOT EXISTS idx_media_sha ON media(sha256);
 
 -- full-text search over message content (trigram = CJK substring friendly)
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-    content, sender, name UNINDEXED,
+    content, sender,
     content='messages', content_rowid='id',
-    tokenize='trigram'
+    tokenize='trigram'   -- substring search; queries < 3 chars fall back to LIKE
 );
 -- triggers keep FTS in sync with messages
 CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN

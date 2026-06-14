@@ -108,24 +108,219 @@ def get_channels(conn, person_id):
     return [_channel_row(r) for r in rows]
 
 
-# ----- interactions ---------------------------------------------------------
+# ----- accounts -------------------------------------------------------------
 
-def record_interaction(conn, *, channel_id, ts, direction="", summary=""):
+def upsert_account(conn, *, account_id, platform, label="", self_id="",
+                   host="", cred_ref=""):
     conn.execute(
-        """INSERT OR IGNORE INTO interactions
-               (channel_id, ts, direction, summary, recorded_at)
-           VALUES (?, ?, ?, ?, ?)""",
-        (channel_id, ts, direction, summary, _now()),
+        """
+        INSERT INTO accounts (account_id, platform, label, self_id, host, cred_ref,
+                              created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id) DO UPDATE SET
+            platform=excluded.platform, label=excluded.label,
+            self_id=excluded.self_id, host=excluded.host, cred_ref=excluded.cred_ref
+        """,
+        (account_id, platform, label, self_id, host, cred_ref, _now()),
     )
+    conn.commit()
+    return account_id
+
+
+def get_accounts(conn):
+    rows = conn.execute("SELECT * FROM accounts ORDER BY account_id").fetchall()
+    return [dict(r) for r in rows]
+
+
+# ----- conversations --------------------------------------------------------
+
+def upsert_conversation(conn, *, account_id, platform, chat_id, name="",
+                        type="private", unread=0, last_activity_at=None):
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO conversations (account_id, platform, chat_id, name, type,
+                                   unread, last_activity_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, chat_id) DO UPDATE SET
+            name=excluded.name, type=excluded.type, unread=excluded.unread,
+            last_activity_at=COALESCE(excluded.last_activity_at,
+                                      conversations.last_activity_at),
+            updated_at=excluded.updated_at
+        """,
+        (account_id, platform, chat_id, name, type, unread, last_activity_at,
+         now, now),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id FROM conversations WHERE account_id=? AND chat_id=?",
+        (account_id, chat_id),
+    ).fetchone()
+    return row["id"]
+
+
+def get_conversations(conn, *, muted=None, person_id="__all__", account_id=None):
+    sql = "SELECT * FROM conversations WHERE 1=1"
+    args = []
+    if muted is not None:
+        sql += " AND muted=?"
+        args.append(1 if muted else 0)
+    if person_id != "__all__":
+        if person_id is None:
+            sql += " AND person_id IS ?"
+        else:
+            sql += " AND person_id=?"
+        args.append(person_id)
+    if account_id is not None:
+        sql += " AND account_id=?"
+        args.append(account_id)
+    sql += " ORDER BY last_activity_at DESC"
+    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def set_muted(conn, conversation_id, muted):
+    conn.execute("UPDATE conversations SET muted=?, updated_at=? WHERE id=?",
+                 (1 if muted else 0, _now(), conversation_id))
     conn.commit()
 
 
-def latest_interaction(conn, channel_id):
-    row = conn.execute(
-        "SELECT * FROM interactions WHERE channel_id=? ORDER BY ts DESC LIMIT 1",
-        (channel_id,),
+def link_person(conn, conversation_id, person_id):
+    conn.execute("UPDATE conversations SET person_id=?, updated_at=? WHERE id=?",
+                 (person_id, _now(), conversation_id))
+    conn.commit()
+
+
+# ----- messages -------------------------------------------------------------
+
+def insert_messages(conn, conversation_id, records):
+    """Insert MsgRecords with dedup on (conversation_id, msg_key). Returns count
+    inserted and bumps the conversation's last_activity_at to the newest ts."""
+    conv = conn.execute(
+        "SELECT account_id, platform FROM conversations WHERE id=?",
+        (conversation_id,),
     ).fetchone()
-    return dict(row) if row else None
+    if conv is None:
+        raise ValueError(f"no conversation {conversation_id}")
+    inserted = 0
+    max_ts = 0
+    now = _now()
+    for r in records:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO messages
+                   (conversation_id, account_id, platform, msg_key, ts, sender,
+                    sender_id, direction, type, content, media_ref, is_mentioned,
+                    raw, recorded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (conversation_id, conv["account_id"], conv["platform"], r.msg_key, r.ts,
+             r.sender, r.sender_id, r.direction, r.type, r.content, r.media_ref,
+             1 if r.is_mentioned else 0,
+             json.dumps(r.raw, ensure_ascii=False), now),
+        )
+        inserted += cur.rowcount
+        if r.ts > max_ts:
+            max_ts = r.ts
+    if max_ts:
+        conn.execute(
+            """UPDATE conversations
+               SET last_activity_at = MAX(COALESCE(last_activity_at, 0), ?),
+                   updated_at=?
+               WHERE id=?""",
+            (max_ts, now, conversation_id),
+        )
+    conn.commit()
+    return inserted
+
+
+def search_messages(conn, query, *, limit=50, account_id=None):
+    """Keyword search over message content, newest-relevant first.
+
+    The FTS5 trigram tokenizer only matches queries of >= 3 characters, but
+    2-char words dominate Chinese (合同/发票/明天). So for queries shorter than 3
+    chars we fall back to a LIKE substring scan; >= 3 chars use FTS5 + bm25 rank.
+    """
+    q = (query or "").strip()
+    if len(q) < 3:
+        # full-table scan; acceptable for the short-query fallback at single-user scale
+        sql = "SELECT m.* FROM messages m WHERE m.content LIKE ?"
+        args = [f"%{q}%"]
+        if account_id is not None:
+            sql += " AND m.account_id=?"
+            args.append(account_id)
+        sql += " ORDER BY m.ts DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    sql = """
+        SELECT m.* FROM messages_fts f
+        JOIN messages m ON m.id = f.rowid
+        WHERE messages_fts MATCH ?
+    """
+    # treat the whole query as a literal phrase so FTS5 operators
+    # (OR/AND/NEAR/parens/quotes) in user input don't raise syntax errors
+    args = ['"' + q.replace('"', '""') + '"']
+    if account_id is not None:
+        sql += " AND m.account_id=?"
+        args.append(account_id)
+    sql += " ORDER BY bm25(messages_fts), m.ts DESC LIMIT ?"
+    args.append(limit)
+    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+# ----- reset (destructive; HITL-gated at the CLI layer) ---------------------
+
+def reset_store(conn, *, dry_run=True, platform=None, include_accounts=False):
+    """Count (dry_run) or wipe ingested store data. Never touches persons.
+    Returns a dict of affected-row counts. CASCADE handles media via messages."""
+    where = ""
+    args = []
+    if platform is not None:
+        where = " WHERE platform=?"
+        args = [platform]
+    counts = {
+        "messages": conn.execute(
+            f"SELECT COUNT(*) AS n FROM messages{where}", args).fetchone()["n"],
+        "conversations": conn.execute(
+            f"SELECT COUNT(*) AS n FROM conversations{where}", args).fetchone()["n"],
+        "media": conn.execute(
+            """SELECT COUNT(*) AS n FROM media WHERE message_id IN
+               (SELECT id FROM messages%s)""" % where, args).fetchone()["n"],
+    }
+    if include_accounts:
+        counts["accounts"] = conn.execute(
+            f"SELECT COUNT(*) AS n FROM accounts{where}", args).fetchone()["n"]
+    if dry_run:
+        return counts
+    # delete conversations first → CASCADE removes their messages + media + fts
+    conn.execute(f"DELETE FROM conversations{where}", args)
+    # belt-and-suspenders for any orphan messages
+    conn.execute(f"DELETE FROM messages{where}", args)
+    if include_accounts:
+        conn.execute(f"DELETE FROM accounts{where}", args)
+    conn.commit()
+    return counts
+
+
+# ----- derived last-interaction (replaces the interactions table) -----------
+
+def derive_last_interactions(conn, person_id):
+    """Latest message per platform across all conversations linked to a person.
+    Returns {platform: {"ts": int, "summary": str}}."""
+    rows = conn.execute(
+        """
+        SELECT m.platform, m.ts, m.sender, m.content
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE c.person_id = ?
+        ORDER BY m.platform, m.ts DESC
+        """,
+        (person_id,),
+    ).fetchall()
+    out = {}
+    for r in rows:
+        if r["platform"] in out:
+            continue  # rows are ts-desc within platform → first seen is newest
+        summary = r["content"] or ""
+        out[r["platform"]] = {"ts": r["ts"], "summary": summary}
+    return out
 
 
 # ----- events (audit trail) -------------------------------------------------

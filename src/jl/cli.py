@@ -17,20 +17,22 @@ import sys
 import time
 
 from . import db, migrate, weighting
-from .channels import phone as phone_ch
-from .channels import wechat as wechat_ch
-
-# channel kind -> adapter callable returning (ts, summary) for a channel row
-_ADAPTERS = {
-    "wechat": lambda ch, ctx: wechat_ch.last(ch, url=ctx.get("wx_url")),
-    "phone": lambda ch, ctx: phone_ch.last(ch),
-}
 
 
 def _actor():
     """Who is acting — for the audit trail. JL_ACTOR (e.g. cron/<name>) wins,
     else the OS user, else a generic fallback."""
     return os.environ.get("JL_ACTOR") or os.environ.get("USER") or "cli"
+
+
+def _opt_value(args, flag):
+    """Return the value following `flag` in args, or None. Skips it if the next
+    token is itself a flag (e.g. `--channel --confirm` -> None, not '--confirm')."""
+    if flag in args:
+        i = args.index(flag)
+        if i + 1 < len(args) and not args[i + 1].startswith("--"):
+            return args[i + 1]
+    return None
 
 
 def route(args):
@@ -46,26 +48,13 @@ def route(args):
         return ("tokens", {})
     if a in ("救补", "--missing"):
         return ("quebu", {})
+    if a == "reset":
+        return ("reset", {
+            "confirm": "--confirm" in args,
+            "platform": _opt_value(args, "--channel"),
+            "include_accounts": "--all" in args,
+        })
     return ("detail", {"name": a})
-
-
-# ----- per-person signal gathering ------------------------------------------
-
-def _gather(conn, person, ctx):
-    """Reach every channel, persist latest interactions, return weighting signals."""
-    signals = []
-    reaches = 0
-    for ch in db.get_channels(conn, person["id"]):
-        adapter = _ADAPTERS.get(ch["kind"])
-        if not adapter:
-            continue
-        ts, summary = adapter(ch, ctx)
-        reaches += 1
-        if ts:
-            db.record_interaction(conn, channel_id=ch["id"], ts=ts, summary=summary)
-        signals.append({"kind": ch["kind"], "ts": ts, "summary": summary,
-                        "channel_id": ch["id"]})
-    return signals, reaches
 
 
 def days_str(days):
@@ -77,14 +66,12 @@ def days_str(days):
 def cmd_sweep(conn, ctx):
     persons = db.get_persons(conn)
     print(f"\n🟢🟡🔴 关系账户健康度 — {time.strftime('%Y-%m-%d %H:%M')}")
-    print(f"   微信 MCP: {'✅' if ctx.get('wx_url') else '❌ offline'}\n")
     print(f"{'姓名':<18} {'类别':<14} {'综合(天)':<10} {'渠道':<8} {'状态'}")
     print("─" * 70)
     red = []
-    total_reach = 0
     for p in persons:
-        signals, reaches = _gather(conn, p, ctx)
-        total_reach += reaches
+        last = db.derive_last_interactions(conn, p["id"])
+        signals = [{"kind": plat, "ts": d["ts"]} for plat, d in last.items()]
         chosen = weighting.combine(signals)
         comb_d = chosen["days"] if chosen else None
         col = weighting.color(comb_d, p["threshold_days"])
@@ -97,11 +84,8 @@ def cmd_sweep(conn, ctx):
         for p, d in red:
             d_s = f"{d:.1f} 天" if d is not None else "全渠道空"
             print(f"  • {p['name']:<14} 距上次互动 {d_s} (阈值 {p['threshold_days']} 天)")
-    _print_missing(conn, persons)
-    db.record_tokens(conn, channel_kind="*", op="sweep", reach_count=total_reach)
     db.log_event(conn, kind="sweep", actor=_actor(),
-                 detail={"persons": len(persons), "red": len(red),
-                         "reaches": total_reach})
+                 detail={"persons": len(persons), "red": len(red)})
 
 
 def cmd_detail(conn, ctx, name):
@@ -113,23 +97,19 @@ def cmd_detail(conn, ctx, name):
     print(f"\n=== {p['name']} ({p['category']}) ===")
     print(f"别名: {', '.join(p['aliases']) or '-'}")
     print(f"阈值: {p['threshold_days']} 天")
-    signals, reaches = _gather(conn, p, ctx)
-    if not signals:
-        print("(无已配置渠道)")
-    for s in signals:
-        d = weighting.days_since(s["ts"])
-        if s["ts"]:
-            print(f"  {s['kind']:<8} last: {s['summary']} ({d:.1f} 天前)")
-        else:
-            print(f"  {s['kind']:<8} last: (无)")
+    last = db.derive_last_interactions(conn, p["id"])
+    if not last:
+        print("(无消息记录)")
+    signals = []
+    for plat, d in last.items():
+        signals.append({"kind": plat, "ts": d["ts"]})
+        days = weighting.days_since(d["ts"])
+        print(f"  {plat:<8} last: {d['summary']} ({days:.1f} 天前)")
     chosen = weighting.combine(signals)
     if chosen:
         col = weighting.color(chosen["days"], p["threshold_days"])
         print(f"\n综合: {col} {chosen['days']:.1f} 天 (via {chosen['kind']})")
-    # deep-dive also reaches live channels — account for it and leave a trace.
-    db.record_tokens(conn, channel_kind="*", op="detail", reach_count=reaches)
-    db.log_event(conn, kind="detail", person_id=p["id"], actor=_actor(),
-                 detail={"reaches": reaches})
+    db.log_event(conn, kind="detail", person_id=p["id"], actor=_actor(), detail={"platforms": list(last)})
 
 
 def cmd_quebu(conn, ctx):
@@ -171,6 +151,26 @@ def cmd_tokens(conn, ctx):
     print(f"  reach 次数: {t['reach_count']}")
     print(f"  tokens_in:  {t['tokens_in']}")
     print(f"  tokens_out: {t['tokens_out']}")
+
+
+def cmd_reset(conn, params):
+    counts = db.reset_store(conn, dry_run=True,
+                            platform=params["platform"],
+                            include_accounts=params["include_accounts"])
+    base = params["platform"] or "ALL channels"
+    scope = base + (" + accounts" if params["include_accounts"] else "")
+    print(f"\n⚠️ 复位 reset — 影响范围: {scope}")
+    for k, v in counts.items():
+        print(f"  {k}: {v}")
+    if not params["confirm"]:
+        print("\n这是 dry-run。确认无误后加 --confirm 真正清除 (persons 不受影响)。")
+        return
+    # audit BEFORE the wipe so the trace survives it
+    db.log_event(conn, kind="reset", actor=_actor(),
+                 detail={"scope": scope, "counts": counts})
+    db.reset_store(conn, dry_run=False, platform=params["platform"],
+                   include_accounts=params["include_accounts"])
+    print("\n✅ 已清除。可重新点火 (jl ignite — B 阶段) 灌入。")
 
 
 # ----- helpers --------------------------------------------------------------
@@ -215,10 +215,10 @@ def main(argv=None):
     conn = db.connect()
     db.init_db(conn)
     ctx = {}
-    if command in ("sweep", "detail"):
-        ctx["wx_url"] = wechat_ch.pick_endpoint()
     if command == "detail":
         cmd_detail(conn, ctx, params["name"])
+    elif command == "reset":
+        cmd_reset(conn, params)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()

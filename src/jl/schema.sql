@@ -1,6 +1,7 @@
--- jl relationship-account router — v0.5 schema (5 tables)
--- Source of truth for contact identity + cross-channel interaction snapshots,
--- plus a human-in-the-loop audit trail and token-usage accounting.
+-- jl relationship-account router / AMR message store — v0.6 schema (8 tables + FTS)
+-- persons / channels / accounts / conversations / messages / media / events / tokens,
+-- plus messages_fts (FTS5 trigram). Source of truth for contact identity, the
+-- multi-account message store, a human-in-the-loop audit trail, and token accounting.
 
 CREATE TABLE IF NOT EXISTS persons (
     id             TEXT PRIMARY KEY,           -- stable slug, e.g. "lixiangquan"
@@ -22,17 +23,94 @@ CREATE TABLE IF NOT EXISTS channels (
     UNIQUE (person_id, kind, identifier)
 );
 
-CREATE TABLE IF NOT EXISTS interactions (
-    id         INTEGER PRIMARY KEY,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    ts         INTEGER NOT NULL,               -- unix seconds of the interaction
-    direction  TEXT NOT NULL DEFAULT '',       -- in / out
-    summary    TEXT NOT NULL DEFAULT '',       -- one-line last message/call
-    recorded_at INTEGER NOT NULL,
-    UNIQUE (channel_id, ts)                     -- repeated sweeps don't pile up dups
+-- the user's own login identities (inboxes we ingest FROM); 8-bit id space
+CREATE TABLE IF NOT EXISTS accounts (
+    account_id INTEGER PRIMARY KEY CHECK (account_id BETWEEN 0 AND 255),
+    platform   TEXT NOT NULL,
+    label      TEXT NOT NULL DEFAULT '',
+    self_id    TEXT NOT NULL DEFAULT '',
+    host       TEXT NOT NULL DEFAULT '',
+    cred_ref   TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    UNIQUE (platform, self_id)
 );
-CREATE INDEX IF NOT EXISTS idx_interactions_channel_ts
-    ON interactions(channel_id, ts DESC);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id            INTEGER PRIMARY KEY,
+    account_id    INTEGER NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+    platform      TEXT NOT NULL,
+    chat_id       TEXT NOT NULL,
+    type          TEXT NOT NULL DEFAULT 'private',
+    name          TEXT NOT NULL DEFAULT '',
+    person_id     TEXT REFERENCES persons(id),
+    muted         INTEGER NOT NULL DEFAULT 0,
+    unread        INTEGER NOT NULL DEFAULT 0,
+    last_activity_at INTEGER,
+    backfill_done   INTEGER NOT NULL DEFAULT 0,
+    backfill_cursor TEXT NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    UNIQUE (account_id, chat_id)
+);
+CREATE INDEX IF NOT EXISTS idx_conv_person ON conversations(person_id);
+CREATE INDEX IF NOT EXISTS idx_conv_activity ON conversations(last_activity_at DESC);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id           INTEGER PRIMARY KEY,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    account_id   INTEGER NOT NULL,
+    platform     TEXT NOT NULL,
+    msg_key      TEXT NOT NULL,
+    ts           INTEGER NOT NULL,
+    sender       TEXT NOT NULL DEFAULT '',
+    sender_id    TEXT NOT NULL DEFAULT '',
+    direction    TEXT NOT NULL DEFAULT 'in',
+    type         TEXT NOT NULL DEFAULT 'text',
+    content      TEXT NOT NULL DEFAULT '',
+    media_ref    TEXT NOT NULL DEFAULT '',
+    is_mentioned INTEGER NOT NULL DEFAULT 0,
+    embedding_id INTEGER,
+    raw          TEXT NOT NULL DEFAULT '{}',
+    recorded_at  INTEGER NOT NULL,
+    UNIQUE (conversation_id, msg_key)
+);
+CREATE INDEX IF NOT EXISTS idx_msg_conv_ts ON messages(conversation_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(ts DESC);
+
+CREATE TABLE IF NOT EXISTS media (
+    id          INTEGER PRIMARY KEY,
+    sha256      TEXT,
+    message_id  INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL DEFAULT '',
+    mime        TEXT NOT NULL DEFAULT '',
+    filename    TEXT NOT NULL DEFAULT '',
+    ext         TEXT NOT NULL DEFAULT '',
+    size        INTEGER NOT NULL DEFAULT 0,
+    source_ref  TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending',
+    transcript  TEXT NOT NULL DEFAULT '',
+    fetched_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_media_message ON media(message_id);
+CREATE INDEX IF NOT EXISTS idx_media_sha ON media(sha256);
+
+-- full-text search (trigram = CJK substring; NOTE: only matches queries >= 3 chars,
+-- so the search layer uses a LIKE fallback for shorter queries)
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    content, sender,
+    content='messages', content_rowid='id',
+    tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, content, sender) VALUES (new.id, new.content, new.sender);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, content, sender) VALUES('delete', old.id, old.content, old.sender);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, content, sender) VALUES('delete', old.id, old.content, old.sender);
+    INSERT INTO messages_fts(rowid, content, sender) VALUES (new.id, new.content, new.sender);
+END;
 
 -- Human-in-the-loop audit trail: who / when / why for every decision & intervention.
 CREATE TABLE IF NOT EXISTS events (
