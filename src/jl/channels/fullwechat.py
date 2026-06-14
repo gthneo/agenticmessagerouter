@@ -70,6 +70,8 @@ def map_message(msg):
         content=msg.get("content", "") or "",
         sender=msg.get("senderName", "") or "",
         sender_id=msg.get("sender", "") or "",
+        # NOTE: always inbound in this MVP — outbound detection (sender == self wxid)
+        # needs self-id reconciliation (device-suffix mismatch); deferred to B 续.
         direction="in",
         type="text" if msg.get("type") == 1 else str(msg.get("type")),
         is_mentioned=bool(msg.get("isMentioned")),

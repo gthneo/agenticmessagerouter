@@ -43,3 +43,18 @@ def test_api_search_hits_content():
 def test_api_search_empty_query_returns_empty():
     c = _seed()
     assert web.api_search(c, "") == []
+
+
+def test_api_messages_bad_id_path_is_404(monkeypatch):
+    import threading, time, urllib.request, urllib.error, tempfile
+    from jl import web, db
+    p = tempfile.mktemp(suffix=".db"); c = db.connect(p); db.init_db(c); c.close()
+    t = threading.Thread(target=web.serve,
+                         kwargs={"conn_path": p, "host": "127.0.0.1", "port": 8094},
+                         daemon=True); t.start()
+    time.sleep(0.5)
+    try:
+        urllib.request.urlopen("http://127.0.0.1:8094/api/conversations/abc/messages")
+        assert False, "expected HTTPError"
+    except urllib.error.HTTPError as e:
+        assert e.code == 404

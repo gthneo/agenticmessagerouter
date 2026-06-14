@@ -65,7 +65,10 @@ def make_handler(db_path):
                 if u.path == "/api/conversations":
                     return self._send(200, api_conversations(conn, params))
                 if u.path.startswith("/api/conversations/") and u.path.endswith("/messages"):
-                    cid = int(u.path.split("/")[3])
+                    try:
+                        cid = int(u.path.split("/")[3])
+                    except (ValueError, IndexError):
+                        return self._send(404, {"error": "bad conversation id"})
                     return self._send(200, api_messages(conn, cid))
                 if u.path == "/api/search":
                     return self._send(200, api_search(conn, params.get("q", "")))
