@@ -38,3 +38,24 @@ def test_map_message_skips_deleted_via_none():
 def test_map_chat_group_muted():
     c = lark.map_chat({"chat_id": "oc_1", "name": "项目群", "chat_mode": "group"})
     assert c.chat_id == "oc_1" and c.type == "group" and c.muted is True
+
+
+def test_adapter_paginates_with_page_token(monkeypatch):
+    a = lark.LarkAdapter()
+    calls = []
+    pages = {
+        None: {"data": {"chats": [{"chat_id": "oc_1", "name": "群1", "chat_mode": "group"}],
+                        "has_more": True, "page_token": "tok2"}},
+        "tok2": {"data": {"chats": [{"chat_id": "oc_2", "name": "群2", "chat_mode": "group"}],
+                         "has_more": False, "page_token": None}},
+    }
+    def fake_run(args):
+        # capture whether --page-all is ever used (must NOT be), and the page-token
+        assert "--page-all" not in args, "must not use --page-all"
+        tok = args[args.index("--page-token") + 1] if "--page-token" in args else None
+        calls.append(tok)
+        return pages[tok]
+    monkeypatch.setattr(a, "_run", fake_run)
+    convs = a.all_conversations(None)
+    assert [c.chat_id for c in convs] == ["oc_1", "oc_2"]   # both pages collected
+    assert calls == [None, "tok2"]                          # followed page_token

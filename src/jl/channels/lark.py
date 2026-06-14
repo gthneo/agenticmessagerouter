@@ -81,19 +81,28 @@ class LarkAdapter(ingest.IngestAdapter):
             raise RuntimeError(f"lark-cli {args} failed: {out.stderr[:200]}")
         return json.loads(out.stdout or "{}")
 
+    def _paged(self, base_args, list_key, page_size=50):
+        items, token = [], None
+        while True:
+            args = list(base_args) + ["--page-size", str(page_size)]
+            if token:
+                args += ["--page-token", token]
+            data = (self._run(args).get("data") or {})
+            items.extend(data.get(list_key) or [])
+            token = data.get("page_token")
+            if not data.get("has_more") or not token:
+                break
+        return items
+
     def all_conversations(self, account):
-        d = self._run(["im", "+chat-list", "--as", "user", "--page-all"])
-        chats = (d.get("data") or {}).get("chats") or []
+        chats = self._paged(["im", "+chat-list", "--as", "user"], "chats")
         return [map_chat(c) for c in chats]
 
-    # ABC contract: list_conversations is the required method; for lark the full
-    # enumeration is the same (chat-list is already paged via --page-all).
     list_conversations = all_conversations
 
     def _messages(self, chat_id):
-        d = self._run(["im", "+chat-messages-list", "--as", "user",
-                       "--chat-id", chat_id, "--page-all"])
-        msgs = (d.get("data") or {}).get("messages") or []
+        msgs = self._paged(["im", "+chat-messages-list", "--as", "user",
+                            "--chat-id", chat_id], "messages")
         return [m for m in (map_message(x) for x in msgs) if m is not None]
 
     def backfill(self, account, conv, cursor):
