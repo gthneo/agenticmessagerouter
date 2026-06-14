@@ -67,7 +67,19 @@ jl web                     # 起只读 Web 收件箱（默认 0.0.0.0:8088；--h
 - **摄取**：`jl ignite` 走 `channels/fullwechat.py` 适配器，分页遍历整个会话表（活跃排序里官方号/折叠夹占大头，自动跳过 `gh_*`/`brandsessionholder`/`placeholder*`/`_*`），把每个真人/群会话的近期消息去重入库；群默认 mute（防万条未读过载，仍入库、只是不进活跃流）。每次 ignite/poll 写 `ignite` 审计事件。
 - **Web 收件箱**：纯 stdlib `http.server`，**只读**（看会话/读消息/全文搜索；回复=sub-project E 的审批 outbox）。路由 `/api/conversations`(默认非 mute，`?muted=1` 看群)、`/api/conversations/{id}/messages`、`/api/search?q=`，根路径返回内嵌 HTML/JS 收件箱。消息渲染做 HTML 转义。
 - **暴露与鉴权**：默认绑 `0.0.0.0`(LAN 可访问)。因展示私聊全文,**部署到 .178 时务必设 `JL_WEB_TOKEN`**(env);设了之后 `/api/*` 需带 `?token=` 或 `Authorization: Bearer`。
-- **部署 .178**：纯 python3.10(已在 .178),零 pip。`jl web --host 0.0.0.0 --port 8088` + 后台 `jl poll`,班迪浏览器访问 `192.168.31.178:8088`。详见 `docs/superpowers/plans/2026-06-14-amr-sub-project-b-and-web-mvp.md`。
+- **部署 .178**：纯 python3.10(已在 .178),零 pip。systemd `--user` 常驻(`amr-web`+`amr-poll`,开机自启)。部署/升级:`deploy/deploy.sh dbos-user@192.168.31.178`。详见 `deploy/README.md`。
+
+## 多主机摄取(边缘采集器 push）
+
+wechat 走 .178 本地 fullwechat；**飞书/企微/电话的凭据在 Mac**,所以它们作为**边缘采集器**在 Mac 跑、push 到 .178 的中心库:
+
+```sh
+jl push phone --remote http://192.168.31.178:8088 --token <web_token>   # 电话(CallHistory)→ .178
+```
+
+- 服务端 .178 暴露**鉴权的 `POST /api/ingest`**(`JL_WEB_TOKEN`,幂等去重),采集器把会话/消息正规化成 `{account, conversations:[{conv,msgs}]}` POST 上去,调 `db.ingest_records` 入库。
+- `account_id`:wechat=1、phone=2(8-bit 多账号)。摄取=收集**自己的**数据(非对外发送),与 ignite/poll 同类,不走发送审批门。
+- 飞书(lark-cli)/企微(wecom-cli)适配器复用同一 push 路径(下一批)。Mac 侧可挂 cron/launchd 定时 push。
 
 > sweep 现在读**派生 last**（来自已入库的 messages）。在 sub-project B 的摄取/轮询把消息灌进来之前，
 > 全员显示 ⚪（无数据）属正常 —— 这正是"库先建好、摄取后填"的架构。

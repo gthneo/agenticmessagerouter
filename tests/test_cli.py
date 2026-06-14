@@ -149,3 +149,16 @@ def test_route_web():
 def test_route_web_custom_port():
     _, params = cli.route(["web", "--port", "9000"])
     assert params["port"] == 9000
+
+
+def test_route_push():
+    cmd, params = cli.route(["push", "phone", "--remote", "http://x:8088", "--token", "t"])
+    assert cmd == "push"
+    assert params["channel"] == "phone"
+    assert params["remote"] == "http://x:8088"
+    assert params["token"] == "t"
+
+
+def test_route_push_defaults_channel_phone():
+    cmd, params = cli.route(["push"])
+    assert cmd == "push" and params["channel"] == "phone"
