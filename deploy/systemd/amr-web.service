@@ -1,0 +1,16 @@
+[Unit]
+Description=AMR read-only web inbox (jl)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/amr
+Environment=PYTHONPATH=%h/amr/src
+Environment=AGENT_WECHAT_URL=http://localhost:6174
+EnvironmentFile=%h/.config/jl/amr.env
+ExecStart=__PYTHON__ -m jl.cli web --host 0.0.0.0 --port 8088
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
