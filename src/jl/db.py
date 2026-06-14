@@ -108,6 +108,88 @@ def get_channels(conn, person_id):
     return [_channel_row(r) for r in rows]
 
 
+# ----- accounts -------------------------------------------------------------
+
+def upsert_account(conn, *, account_id, platform, label="", self_id="",
+                   host="", cred_ref=""):
+    conn.execute(
+        """
+        INSERT INTO accounts (account_id, platform, label, self_id, host, cred_ref,
+                              created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id) DO UPDATE SET
+            platform=excluded.platform, label=excluded.label,
+            self_id=excluded.self_id, host=excluded.host, cred_ref=excluded.cred_ref
+        """,
+        (account_id, platform, label, self_id, host, cred_ref, _now()),
+    )
+    conn.commit()
+    return account_id
+
+
+def get_accounts(conn):
+    rows = conn.execute("SELECT * FROM accounts ORDER BY account_id").fetchall()
+    return [dict(r) for r in rows]
+
+
+# ----- conversations --------------------------------------------------------
+
+def upsert_conversation(conn, *, account_id, platform, chat_id, name="",
+                        type="private", unread=0, last_activity_at=None):
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO conversations (account_id, platform, chat_id, name, type,
+                                   unread, last_activity_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, chat_id) DO UPDATE SET
+            name=excluded.name, type=excluded.type, unread=excluded.unread,
+            last_activity_at=COALESCE(excluded.last_activity_at,
+                                      conversations.last_activity_at),
+            updated_at=excluded.updated_at
+        """,
+        (account_id, platform, chat_id, name, type, unread, last_activity_at,
+         now, now),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id FROM conversations WHERE account_id=? AND chat_id=?",
+        (account_id, chat_id),
+    ).fetchone()
+    return row["id"]
+
+
+def get_conversations(conn, *, muted=None, person_id="__all__", account_id=None):
+    sql = "SELECT * FROM conversations WHERE 1=1"
+    args = []
+    if muted is not None:
+        sql += " AND muted=?"
+        args.append(1 if muted else 0)
+    if person_id != "__all__":
+        if person_id is None:
+            sql += " AND person_id IS ?"
+        else:
+            sql += " AND person_id=?"
+        args.append(person_id)
+    if account_id is not None:
+        sql += " AND account_id=?"
+        args.append(account_id)
+    sql += " ORDER BY last_activity_at DESC"
+    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def set_muted(conn, conversation_id, muted):
+    conn.execute("UPDATE conversations SET muted=?, updated_at=? WHERE id=?",
+                 (1 if muted else 0, _now(), conversation_id))
+    conn.commit()
+
+
+def link_person(conn, conversation_id, person_id):
+    conn.execute("UPDATE conversations SET person_id=?, updated_at=? WHERE id=?",
+                 (person_id, _now(), conversation_id))
+    conn.commit()
+
+
 # ----- interactions ---------------------------------------------------------
 
 def record_interaction(conn, *, channel_id, ts, direction="", summary=""):
