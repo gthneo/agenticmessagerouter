@@ -55,7 +55,8 @@ def route(args):
             "include_accounts": "--all" in args,
         })
     if a == "ignite":
-        return ("ignite", {})
+        ch = args[1] if len(args) > 1 and not args[1].startswith("--") else "wechat"
+        return ("ignite", {"channel": ch})
     if a == "poll":
         return ("poll", {"interval": int(_opt_value(args, "--interval") or 300)})
     if a == "web":
@@ -188,28 +189,36 @@ def cmd_reset(conn, params):
     print("\n✅ 已清除。可重新点火 (jl ignite — B 阶段) 灌入。")
 
 
-def _ensure_wechat_account(conn):
-    from .channels import fullwechat
-    accts = {a["account_id"] for a in db.get_accounts(conn)}
-    if 1 not in accts:
-        db.upsert_account(conn, account_id=1, platform="wechat",
-                          label="fullwechat #1", host=fullwechat.DEFAULT_URL)
-    return 1
+def _ensure_account(conn, account_id, platform, label, host=""):
+    if account_id not in {a["account_id"] for a in db.get_accounts(conn)}:
+        db.upsert_account(conn, account_id=account_id, platform=platform,
+                          label=label, host=host)
+    return account_id
 
 
 def cmd_ignite(conn, ctx):
-    from .channels.fullwechat import FullWechatAdapter
     from . import ingest_run
-    aid = _ensure_wechat_account(conn)
-    n = ingest_run.ignite(conn, FullWechatAdapter(), account_id=aid, actor=_actor())
-    print(f"✅ 点火完成: 新增 {n} 条消息入库 (account #{aid})")
+    ch = ctx.get("channel", "wechat")
+    if ch == "wechat":
+        from .channels.fullwechat import FullWechatAdapter, DEFAULT_URL
+        adapter = FullWechatAdapter()
+        aid = _ensure_account(conn, 1, "wechat", "fullwechat #1", DEFAULT_URL)
+    elif ch == "lark":
+        from .channels.lark import LarkAdapter
+        adapter = LarkAdapter()
+        aid = _ensure_account(conn, 3, "feishu", "feishu #1")
+    else:
+        print(f"❌ 未知渠道: {ch} (支持: wechat, lark)")
+        return
+    n = ingest_run.ignite(conn, adapter, account_id=aid, actor=_actor())
+    print(f"✅ 点火完成 [{ch}]: 新增 {n} 条消息入库 (account #{aid})")
 
 
 def cmd_poll(conn, ctx):
     import time as _t
-    from .channels.fullwechat import FullWechatAdapter
+    from .channels.fullwechat import FullWechatAdapter, DEFAULT_URL
     from . import ingest_run
-    aid = _ensure_wechat_account(conn)
+    aid = _ensure_account(conn, 1, "wechat", "fullwechat #1", DEFAULT_URL)
     interval = ctx.get("interval", 300)
     print(f"🔁 poll 每 {interval}s 拉新 (Ctrl-C 停)")
     while True:
@@ -297,7 +306,7 @@ def main(argv=None):
     elif command == "reset":
         cmd_reset(conn, params)
     elif command == "ignite":
-        cmd_ignite(conn, ctx)
+        ctx["channel"] = params["channel"]; cmd_ignite(conn, ctx)
     elif command == "poll":
         ctx["interval"] = params["interval"]; cmd_poll(conn, ctx)
     elif command == "web":
