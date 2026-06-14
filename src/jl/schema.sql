@@ -1,6 +1,7 @@
--- jl relationship-account router — v0.5 schema (5 tables)
--- Source of truth for contact identity + cross-channel interaction snapshots,
--- plus a human-in-the-loop audit trail and token-usage accounting.
+-- jl relationship-account router / AMR message store — v0.6 schema (8 tables + FTS)
+-- persons / channels / accounts / conversations / messages / media / events / tokens,
+-- plus messages_fts (FTS5 trigram). Source of truth for contact identity, the
+-- multi-account message store, a human-in-the-loop audit trail, and token accounting.
 
 CREATE TABLE IF NOT EXISTS persons (
     id             TEXT PRIMARY KEY,           -- stable slug, e.g. "lixiangquan"
