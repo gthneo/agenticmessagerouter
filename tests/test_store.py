@@ -96,3 +96,90 @@ def test_get_conversations_person_id_none_returns_unlinked(conn):
     unlinked = db.get_conversations(conn, person_id=None)
     assert len(unlinked) == 1
     assert unlinked[0]["chat_id"] == "g1"
+
+
+from jl import ingest
+
+
+def _seed_conv(conn, account_id=1, chat_id="c1"):
+    db.upsert_account(conn, account_id=account_id, platform="wechat",
+                      self_id=f"wxid_self_{account_id}")
+    return db.upsert_conversation(conn, account_id=account_id, platform="wechat",
+                                  chat_id=chat_id, name="张三", type="private")
+
+
+def test_insert_messages_dedups_on_msg_key(conn):
+    cid = _seed_conv(conn)
+    recs = [ingest.MsgRecord(msg_key="fullwx:1", ts=1000, content="明天见", sender="张三")]
+    assert db.insert_messages(conn, cid, recs) == 1
+    assert db.insert_messages(conn, cid, recs) == 0   # same key ignored
+    n = conn.execute("SELECT COUNT(*) AS n FROM messages WHERE conversation_id=?",
+                     (cid,)).fetchone()["n"]
+    assert n == 1
+
+
+def test_insert_messages_updates_last_activity(conn):
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [ingest.MsgRecord(msg_key="x:1", ts=5000, content="hi")])
+    conv = db.get_conversations(conn)[0]
+    assert conv["last_activity_at"] == 5000
+
+
+def test_search_messages_finds_short_cjk_substring_via_like(conn):
+    # 2-char query — below the FTS5 trigram floor, served by the LIKE fallback
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [
+        ingest.MsgRecord(msg_key="x:1", ts=1000, content="记得带合同来", sender="张三"),
+        ingest.MsgRecord(msg_key="x:2", ts=2000, content="今天天气不错", sender="李四"),
+    ])
+    hits = db.search_messages(conn, "合同")
+    assert len(hits) == 1
+    assert hits[0]["content"] == "记得带合同来"
+
+
+def test_search_messages_finds_long_cjk_substring_via_fts(conn):
+    # 3+-char query — served by the FTS5 trigram index
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [
+        ingest.MsgRecord(msg_key="x:1", ts=1000, content="请尽快确认合同条款", sender="张三"),
+        ingest.MsgRecord(msg_key="x:2", ts=2000, content="今天天气不错", sender="李四"),
+    ])
+    hits = db.search_messages(conn, "确认合同")
+    assert len(hits) == 1
+    assert hits[0]["content"] == "请尽快确认合同条款"
+
+
+def test_search_messages_account_filter(conn):
+    c1 = _seed_conv(conn, account_id=1, chat_id="c1")
+    c2 = _seed_conv(conn, account_id=2, chat_id="c2")
+    db.insert_messages(conn, c1, [ingest.MsgRecord(msg_key="x:1", ts=1, content="合同A")])
+    db.insert_messages(conn, c2, [ingest.MsgRecord(msg_key="x:2", ts=2, content="合同B")])
+    hits = db.search_messages(conn, "合同", account_id=1)
+    assert [h["content"] for h in hits] == ["合同A"]
+
+
+def test_delete_message_removes_from_fts(conn):
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [ingest.MsgRecord(msg_key="x:1", ts=1, content="合同")])
+    conn.execute("DELETE FROM messages")
+    conn.commit()
+    assert db.search_messages(conn, "合同") == []
+
+
+def test_search_messages_query_with_fts_operators_does_not_crash(conn):
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [
+        ingest.MsgRecord(msg_key="x:1", ts=1, content="请确认合同 OR 发票", sender="张三"),
+    ])
+    # bare 'OR' is an FTS5 operator; must be treated as literal text, not crash
+    hits = db.search_messages(conn, "合同 OR 发票")
+    assert len(hits) == 1
+
+
+def test_search_messages_query_with_quote_does_not_crash(conn):
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [
+        ingest.MsgRecord(msg_key="x:1", ts=1, content='他说"明天签约"了', sender="张三"),
+    ])
+    hits = db.search_messages(conn, '"明天签约"')
+    assert len(hits) == 1

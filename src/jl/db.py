@@ -190,6 +190,81 @@ def link_person(conn, conversation_id, person_id):
     conn.commit()
 
 
+# ----- messages -------------------------------------------------------------
+
+def insert_messages(conn, conversation_id, records):
+    """Insert MsgRecords with dedup on (conversation_id, msg_key). Returns count
+    inserted and bumps the conversation's last_activity_at to the newest ts."""
+    conv = conn.execute(
+        "SELECT account_id, platform FROM conversations WHERE id=?",
+        (conversation_id,),
+    ).fetchone()
+    if conv is None:
+        raise ValueError(f"no conversation {conversation_id}")
+    inserted = 0
+    max_ts = 0
+    now = _now()
+    for r in records:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO messages
+                   (conversation_id, account_id, platform, msg_key, ts, sender,
+                    sender_id, direction, type, content, media_ref, is_mentioned,
+                    raw, recorded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (conversation_id, conv["account_id"], conv["platform"], r.msg_key, r.ts,
+             r.sender, r.sender_id, r.direction, r.type, r.content, r.media_ref,
+             1 if r.is_mentioned else 0,
+             json.dumps(r.raw, ensure_ascii=False), now),
+        )
+        inserted += cur.rowcount
+        if r.ts > max_ts:
+            max_ts = r.ts
+    if max_ts:
+        conn.execute(
+            """UPDATE conversations
+               SET last_activity_at = MAX(COALESCE(last_activity_at, 0), ?),
+                   updated_at=?
+               WHERE id=?""",
+            (max_ts, now, conversation_id),
+        )
+    conn.commit()
+    return inserted
+
+
+def search_messages(conn, query, *, limit=50, account_id=None):
+    """Keyword search over message content, newest-relevant first.
+
+    The FTS5 trigram tokenizer only matches queries of >= 3 characters, but
+    2-char words dominate Chinese (合同/发票/明天). So for queries shorter than 3
+    chars we fall back to a LIKE substring scan; >= 3 chars use FTS5 + bm25 rank.
+    """
+    q = (query or "").strip()
+    if len(q) < 3:
+        # full-table scan; acceptable for the short-query fallback at single-user scale
+        sql = "SELECT m.* FROM messages m WHERE m.content LIKE ?"
+        args = [f"%{q}%"]
+        if account_id is not None:
+            sql += " AND m.account_id=?"
+            args.append(account_id)
+        sql += " ORDER BY m.ts DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    sql = """
+        SELECT m.* FROM messages_fts f
+        JOIN messages m ON m.id = f.rowid
+        WHERE messages_fts MATCH ?
+    """
+    # treat the whole query as a literal phrase so FTS5 operators
+    # (OR/AND/NEAR/parens/quotes) in user input don't raise syntax errors
+    args = ['"' + q.replace('"', '""') + '"']
+    if account_id is not None:
+        sql += " AND m.account_id=?"
+        args.append(account_id)
+    sql += " ORDER BY bm25(messages_fts), m.ts DESC LIMIT ?"
+    args.append(limit)
+    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
 # ----- interactions ---------------------------------------------------------
 
 def record_interaction(conn, *, channel_id, ts, direction="", summary=""):
