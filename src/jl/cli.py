@@ -54,6 +54,13 @@ def route(args):
             "platform": _opt_value(args, "--channel"),
             "include_accounts": "--all" in args,
         })
+    if a == "ignite":
+        return ("ignite", {})
+    if a == "poll":
+        return ("poll", {"interval": int(_opt_value(args, "--interval") or 300)})
+    if a == "web":
+        return ("web", {"port": int(_opt_value(args, "--port") or 8088),
+                        "host": _opt_value(args, "--host") or "0.0.0.0"})
     return ("detail", {"name": a})
 
 
@@ -173,6 +180,42 @@ def cmd_reset(conn, params):
     print("\n✅ 已清除。可重新点火 (jl ignite — B 阶段) 灌入。")
 
 
+def _ensure_wechat_account(conn):
+    from .channels import fullwechat
+    accts = {a["account_id"] for a in db.get_accounts(conn)}
+    if 1 not in accts:
+        db.upsert_account(conn, account_id=1, platform="wechat",
+                          label="fullwechat #1", host=fullwechat.DEFAULT_URL)
+    return 1
+
+
+def cmd_ignite(conn, ctx):
+    from .channels.fullwechat import FullWechatAdapter
+    from . import ingest_run
+    aid = _ensure_wechat_account(conn)
+    n = ingest_run.ignite(conn, FullWechatAdapter(), account_id=aid, actor=_actor())
+    print(f"✅ 点火完成: 新增 {n} 条消息入库 (account #{aid})")
+
+
+def cmd_poll(conn, ctx):
+    import time as _t
+    from .channels.fullwechat import FullWechatAdapter
+    from . import ingest_run
+    aid = _ensure_wechat_account(conn)
+    interval = ctx.get("interval", 300)
+    print(f"🔁 poll 每 {interval}s 拉新 (Ctrl-C 停)")
+    while True:
+        n = ingest_run.ignite(conn, FullWechatAdapter(), account_id=aid, actor="poll")
+        print(f"  [{_t.strftime('%H:%M:%S')}] +{n}")
+        _t.sleep(interval)
+
+
+def cmd_web(conn, ctx):
+    from . import web
+    web.serve(conn_path=db.DEFAULT_DB, host=ctx.get("host", "0.0.0.0"),
+              port=ctx.get("port", 8088))
+
+
 # ----- helpers --------------------------------------------------------------
 
 def _find_person(conn, name):
@@ -219,6 +262,12 @@ def main(argv=None):
         cmd_detail(conn, ctx, params["name"])
     elif command == "reset":
         cmd_reset(conn, params)
+    elif command == "ignite":
+        cmd_ignite(conn, ctx)
+    elif command == "poll":
+        ctx["interval"] = params["interval"]; cmd_poll(conn, ctx)
+    elif command == "web":
+        ctx.update(params); cmd_web(conn, ctx)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()

@@ -122,3 +122,30 @@ def test_cmd_reset_scope_label_includes_accounts_with_channel(capsys):
 def test_opt_value_skips_following_flag():
     assert cli._opt_value(["reset", "--channel", "--confirm"], "--channel") is None
     assert cli._opt_value(["reset", "--channel", "wechat"], "--channel") == "wechat"
+
+
+def test_route_ignite():
+    assert cli.route(["ignite"]) == ("ignite", {})
+
+
+def test_route_poll():
+    cmd, params = cli.route(["poll"])
+    assert cmd == "poll"
+    assert params["interval"] == 300
+
+
+def test_route_poll_custom_interval():
+    cmd, params = cli.route(["poll", "--interval", "60"])
+    assert params["interval"] == 60
+
+
+def test_route_web():
+    cmd, params = cli.route(["web"])
+    assert cmd == "web"
+    assert params["port"] == 8088
+    assert params["host"] == "0.0.0.0"
+
+
+def test_route_web_custom_port():
+    _, params = cli.route(["web", "--port", "9000"])
+    assert params["port"] == 9000
