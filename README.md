@@ -56,6 +56,19 @@ jl reset --channel wechat --confirm   # 限定单平台
 jl reset --all --confirm     # 连 accounts 注册表一起清
 ```
 
+## 摄取与 Web 收件箱（sub-project B + web MVP）
+
+```sh
+jl ignite                  # 点火：从 fullwechat(@.178) 拉活跃会话的近期消息入库（群默认 mute）
+jl poll                    # 5min 循环增量拉新（--interval 秒；Ctrl-C 停）
+jl web                     # 起只读 Web 收件箱（默认 0.0.0.0:8088；--host/--port）
+```
+
+- **摄取**：`jl ignite` 走 `channels/fullwechat.py` 适配器，分页遍历整个会话表（活跃排序里官方号/折叠夹占大头，自动跳过 `gh_*`/`brandsessionholder`/`placeholder*`/`_*`），把每个真人/群会话的近期消息去重入库；群默认 mute（防万条未读过载，仍入库、只是不进活跃流）。每次 ignite/poll 写 `ignite` 审计事件。
+- **Web 收件箱**：纯 stdlib `http.server`，**只读**（看会话/读消息/全文搜索；回复=sub-project E 的审批 outbox）。路由 `/api/conversations`(默认非 mute，`?muted=1` 看群)、`/api/conversations/{id}/messages`、`/api/search?q=`，根路径返回内嵌 HTML/JS 收件箱。消息渲染做 HTML 转义。
+- **暴露与鉴权**：默认绑 `0.0.0.0`(LAN 可访问)。因展示私聊全文,**部署到 .178 时务必设 `JL_WEB_TOKEN`**(env);设了之后 `/api/*` 需带 `?token=` 或 `Authorization: Bearer`。
+- **部署 .178**：纯 python3.10(已在 .178),零 pip。`jl web --host 0.0.0.0 --port 8088` + 后台 `jl poll`,班迪浏览器访问 `192.168.31.178:8088`。详见 `docs/superpowers/plans/2026-06-14-amr-sub-project-b-and-web-mvp.md`。
+
 > sweep 现在读**派生 last**（来自已入库的 messages）。在 sub-project B 的摄取/轮询把消息灌进来之前，
 > 全员显示 ⚪（无数据）属正常 —— 这正是"库先建好、摄取后填"的架构。
 
@@ -98,8 +111,9 @@ python3 -m venv .venv
 
 - [x] v0.5 数据层：persons/channels + 加权染色 + dispatch
 - [x] **v0.6 sub-project A 消息库地基**：accounts/conversations/messages/media + FTS5 + 8-bit 多账号 + 派生 last + HITL 复位
-- [ ] **B（下一步）**：四渠道摄取适配器（fullwechat/lark-cli/wecom-cli/CallHistory）+ 点火 ignite + 5min 轮询 + mute + 媒体懒取/转写
-- [ ] C 后端 API（.156）+ D 浏览器统一收件箱
+- [x] **B（首批 + web MVP）**：fullwechat 摄取适配器 + 点火 ignite + 5min poll + 群 mute；read-only 浏览器统一收件箱（列表/搜索/读，stdlib http.server）
+- [ ] B 续：lark-cli / wecom-cli / CallHistory 适配器 + 全量回溯 + 媒体懒取/转写
+- [ ] C/D 续：后端 API 上 .156 + 收件箱增强（合并时间线、染色、人归一）
 - [ ] E 发送：各渠道 send + outbox 审批 + 白名单
 - [ ] N8 向量语义召回（sqlite-vec + Ollama@.156）
 
