@@ -74,5 +74,6 @@ class IngestAdapter(abc.ABC):
         """Return (messages, next_cursor); '' next_cursor means done."""
 
     @abc.abstractmethod
-    def pull_new(self, account) -> list[MsgRecord]:
-        """Incremental since last call (server cursor or max-ts)."""
+    def pull_new(self, account):
+        """Incremental pull. Returns [(ConvRecord, [MsgRecord])] — each active
+        conversation with its newest messages (dedup absorbs overlap)."""
