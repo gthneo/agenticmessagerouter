@@ -125,7 +125,15 @@ def test_opt_value_skips_following_flag():
 
 
 def test_route_ignite():
-    assert cli.route(["ignite"]) == ("ignite", {})
+    assert cli.route(["ignite"]) == ("ignite", {"channel": "wechat"})
+
+
+def test_route_ignite_default_channel():
+    assert cli.route(["ignite"]) == ("ignite", {"channel": "wechat"})
+
+
+def test_route_ignite_lark():
+    assert cli.route(["ignite", "lark"]) == ("ignite", {"channel": "lark"})
 
 
 def test_route_poll():
