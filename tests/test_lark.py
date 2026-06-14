@@ -1,0 +1,40 @@
+"""lark (feishu) adapter — pure mapping (live lark-cli verified manually)."""
+from jl.channels import lark
+from jl import ingest
+
+
+def test_extract_text_plain():
+    assert lark.extract_text("text", '{"text":"你好"}') == "你好"
+
+
+def test_extract_text_post_falls_back_to_title_or_type():
+    assert lark.extract_text("interactive", '{"x":1}') == "[interactive]"
+    assert lark.extract_text("post", '{"title":"周报","content":[]}') == "周报"
+
+
+def test_extract_text_bad_json():
+    assert lark.extract_text("text", "not json") == ""
+
+
+def test_map_message():
+    raw = {"message_id": "om_abc", "msg_type": "text", "create_time": "2026-06-14 16:00",
+           "sender": {"id": "ou_sender", "id_type": "open_id"},
+           "content": '{"text":"见附件"}', "chat_id": "oc_1", "deleted": False}
+    m = lark.map_message(raw)
+    assert isinstance(m, ingest.MsgRecord)
+    assert m.msg_key == "lark:om_abc"
+    assert m.content == "见附件"
+    assert m.sender_id == "ou_sender"
+    assert m.type == "text"
+    assert m.ts == lark._ts("2026-06-14 16:00") and m.ts > 0
+
+
+def test_map_message_skips_deleted_via_none():
+    raw = {"message_id": "om_x", "msg_type": "text", "create_time": "2026-06-14 16:00",
+           "sender": {"id": "ou_s"}, "content": '{"text":"x"}', "deleted": True}
+    assert lark.map_message(raw) is None
+
+
+def test_map_chat_group_muted():
+    c = lark.map_chat({"chat_id": "oc_1", "name": "项目群", "chat_mode": "group"})
+    assert c.chat_id == "oc_1" and c.type == "group" and c.muted is True

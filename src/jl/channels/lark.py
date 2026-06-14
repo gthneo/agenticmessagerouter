@@ -1,0 +1,106 @@
+"""Lark/Feishu ingestion adapter via the lark-cli (@larksuite/cli) subprocess.
+
+Pure mappers unit-tested; live methods shell out to `lark-cli` (user identity) and
+are verified by integration runs on the host where lark-cli is authenticated.
+Scope: group/topic chats (chat-list). P2P/DM enumeration is a follow-up.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+from datetime import datetime, timezone
+
+from .. import ingest
+
+SOURCE = "lark"
+LARK_BIN = "lark-cli"
+
+
+def _ts(s):
+    """'YYYY-MM-DD HH:MM' (lark-cli local-formatted) -> unix seconds. Best-effort."""
+    if not s:
+        return 0
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return int(datetime.strptime(s, fmt).replace(tzinfo=timezone.utc).timestamp())
+        except ValueError:
+            continue
+    return 0
+
+
+def extract_text(msg_type, content):
+    """Best-effort plain text from a lark message content JSON string."""
+    try:
+        c = json.loads(content) if content else {}
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(c, dict):
+        return ""
+    if "text" in c and isinstance(c["text"], str):
+        return c["text"]
+    if "title" in c and isinstance(c["title"], str) and c["title"]:
+        return c["title"]
+    return f"[{msg_type}]"
+
+
+def map_chat(chat):
+    return ingest.ConvRecord(
+        chat_id=chat["chat_id"],
+        name=chat.get("name", ""),
+        type="group",                 # chat-list returns group/topic only
+        muted=True,                   # groups arrive muted (overload control)
+    )
+
+
+def map_message(msg):
+    if msg.get("deleted"):
+        return None
+    sender = msg.get("sender") or {}
+    return ingest.MsgRecord(
+        msg_key=ingest.msg_key(source=SOURCE, stable_id=msg["message_id"]),
+        ts=_ts(msg.get("create_time")),
+        content=extract_text(msg.get("msg_type", ""), msg.get("content", "")),
+        sender="",                    # display-name resolution is a follow-up
+        sender_id=sender.get("id", ""),
+        direction="in",               # outbound detection needs self open_id (follow-up)
+        type=msg.get("msg_type", "text"),
+        raw=msg,
+    )
+
+
+class LarkAdapter(ingest.IngestAdapter):
+    platform = "feishu"
+
+    def __init__(self, bin=LARK_BIN):
+        self.bin = bin
+
+    def _run(self, args):
+        out = subprocess.run([self.bin, *args, "--format", "json"],
+                             capture_output=True, text=True, timeout=60)
+        if out.returncode != 0:
+            raise RuntimeError(f"lark-cli {args} failed: {out.stderr[:200]}")
+        return json.loads(out.stdout or "{}")
+
+    def all_conversations(self, account):
+        d = self._run(["im", "+chat-list", "--as", "user", "--page-all"])
+        chats = (d.get("data") or {}).get("chats") or []
+        return [map_chat(c) for c in chats]
+
+    # ABC contract: list_conversations is the required method; for lark the full
+    # enumeration is the same (chat-list is already paged via --page-all).
+    list_conversations = all_conversations
+
+    def _messages(self, chat_id):
+        d = self._run(["im", "+chat-messages-list", "--as", "user",
+                       "--chat-id", chat_id, "--page-all"])
+        msgs = (d.get("data") or {}).get("messages") or []
+        return [m for m in (map_message(x) for x in msgs) if m is not None]
+
+    def backfill(self, account, conv, cursor):
+        return self._messages(conv.chat_id), ""
+
+    def pull_new(self, account, recent_limit=30):
+        out = []
+        for conv in self.all_conversations(account):
+            out.append((conv, self._messages(conv.chat_id)))
+        return out
