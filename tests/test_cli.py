@@ -67,3 +67,58 @@ def test_event_actor_comes_from_env(seeded, monkeypatch):
     cli.cmd_sweep(seeded, {})
     sweep_evt = [e for e in db.get_events(seeded) if e["kind"] == "sweep"][0]
     assert sweep_evt["actor"] == "user1"
+
+
+def test_route_reset():
+    assert cli.route(["reset"]) == ("reset", {"confirm": False, "platform": None,
+                                              "include_accounts": False})
+
+
+def test_route_reset_confirm_all():
+    cmd, params = cli.route(["reset", "--confirm", "--all"])
+    assert cmd == "reset"
+    assert params["confirm"] is True
+    assert params["include_accounts"] is True
+
+
+def test_cmd_reset_dry_run_does_not_delete(capsys):
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="wxid_self_1")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                 chat_id="c1", name="张三")
+    db.insert_messages(conn, cid, [ingest.MsgRecord(msg_key="x:1", ts=1, content="hi")])
+    cli.cmd_reset(conn, {"confirm": False, "platform": None, "include_accounts": False})
+    out = capsys.readouterr().out
+    assert "dry-run" in out.lower() or "确认" in out
+    assert conn.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"] == 1
+    conn.close()
+
+
+def test_cmd_reset_confirm_wipes_and_audits(capsys):
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="wxid_self_1")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                 chat_id="c1", name="张三")
+    db.insert_messages(conn, cid, [ingest.MsgRecord(msg_key="x:1", ts=1, content="hi")])
+    cli.cmd_reset(conn, {"confirm": True, "platform": None, "include_accounts": False})
+    assert conn.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"] == 0
+    assert "reset" in [e["kind"] for e in db.get_events(conn)]
+    conn.close()
+
+
+def test_cmd_reset_scope_label_includes_accounts_with_channel(capsys):
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="wxid_self_1")
+    db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="c1", name="张三")
+    cli.cmd_reset(conn, {"confirm": False, "platform": "wechat", "include_accounts": True})
+    out = capsys.readouterr().out
+    assert "wechat + accounts" in out              # scope label shows full blast radius
+    conn.close()
+
+
+def test_opt_value_skips_following_flag():
+    assert cli._opt_value(["reset", "--channel", "--confirm"], "--channel") is None
+    assert cli._opt_value(["reset", "--channel", "wechat"], "--channel") == "wechat"

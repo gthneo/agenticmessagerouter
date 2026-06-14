@@ -265,6 +265,40 @@ def search_messages(conn, query, *, limit=50, account_id=None):
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
 
+# ----- reset (destructive; HITL-gated at the CLI layer) ---------------------
+
+def reset_store(conn, *, dry_run=True, platform=None, include_accounts=False):
+    """Count (dry_run) or wipe ingested store data. Never touches persons.
+    Returns a dict of affected-row counts. CASCADE handles media via messages."""
+    where = ""
+    args = []
+    if platform is not None:
+        where = " WHERE platform=?"
+        args = [platform]
+    counts = {
+        "messages": conn.execute(
+            f"SELECT COUNT(*) AS n FROM messages{where}", args).fetchone()["n"],
+        "conversations": conn.execute(
+            f"SELECT COUNT(*) AS n FROM conversations{where}", args).fetchone()["n"],
+        "media": conn.execute(
+            """SELECT COUNT(*) AS n FROM media WHERE message_id IN
+               (SELECT id FROM messages%s)""" % where, args).fetchone()["n"],
+    }
+    if include_accounts:
+        counts["accounts"] = conn.execute(
+            f"SELECT COUNT(*) AS n FROM accounts{where}", args).fetchone()["n"]
+    if dry_run:
+        return counts
+    # delete conversations first → CASCADE removes their messages + media + fts
+    conn.execute(f"DELETE FROM conversations{where}", args)
+    # belt-and-suspenders for any orphan messages
+    conn.execute(f"DELETE FROM messages{where}", args)
+    if include_accounts:
+        conn.execute(f"DELETE FROM accounts{where}", args)
+    conn.commit()
+    return counts
+
+
 # ----- derived last-interaction (replaces the interactions table) -----------
 
 def derive_last_interactions(conn, person_id):

@@ -25,6 +25,16 @@ def _actor():
     return os.environ.get("JL_ACTOR") or os.environ.get("USER") or "cli"
 
 
+def _opt_value(args, flag):
+    """Return the value following `flag` in args, or None. Skips it if the next
+    token is itself a flag (e.g. `--channel --confirm` -> None, not '--confirm')."""
+    if flag in args:
+        i = args.index(flag)
+        if i + 1 < len(args) and not args[i + 1].startswith("--"):
+            return args[i + 1]
+    return None
+
+
 def route(args):
     """Pure: map argv (without program name) to (command, params)."""
     if not args:
@@ -38,6 +48,12 @@ def route(args):
         return ("tokens", {})
     if a in ("救补", "--missing"):
         return ("quebu", {})
+    if a == "reset":
+        return ("reset", {
+            "confirm": "--confirm" in args,
+            "platform": _opt_value(args, "--channel"),
+            "include_accounts": "--all" in args,
+        })
     return ("detail", {"name": a})
 
 
@@ -137,6 +153,26 @@ def cmd_tokens(conn, ctx):
     print(f"  tokens_out: {t['tokens_out']}")
 
 
+def cmd_reset(conn, params):
+    counts = db.reset_store(conn, dry_run=True,
+                            platform=params["platform"],
+                            include_accounts=params["include_accounts"])
+    base = params["platform"] or "ALL channels"
+    scope = base + (" + accounts" if params["include_accounts"] else "")
+    print(f"\n⚠️ 复位 reset — 影响范围: {scope}")
+    for k, v in counts.items():
+        print(f"  {k}: {v}")
+    if not params["confirm"]:
+        print("\n这是 dry-run。确认无误后加 --confirm 真正清除 (persons 不受影响)。")
+        return
+    # audit BEFORE the wipe so the trace survives it
+    db.log_event(conn, kind="reset", actor=_actor(),
+                 detail={"scope": scope, "counts": counts})
+    db.reset_store(conn, dry_run=False, platform=params["platform"],
+                   include_accounts=params["include_accounts"])
+    print("\n✅ 已清除。可重新点火 (jl ignite — B 阶段) 灌入。")
+
+
 # ----- helpers --------------------------------------------------------------
 
 def _find_person(conn, name):
@@ -181,6 +217,8 @@ def main(argv=None):
     ctx = {}
     if command == "detail":
         cmd_detail(conn, ctx, params["name"])
+    elif command == "reset":
+        cmd_reset(conn, params)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()

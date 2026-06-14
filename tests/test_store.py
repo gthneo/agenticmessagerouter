@@ -216,3 +216,47 @@ def test_derive_last_interactions_empty_for_unlinked(conn):
     db.upsert_person(conn, id="u9", name="无会话", category="x",
                      threshold_days=3, aliases=[])
     assert db.derive_last_interactions(conn, "u9") == {}
+
+
+def test_reset_store_dry_run_counts_without_deleting(conn):
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [ingest.MsgRecord(msg_key="x:1", ts=1, content="hi")])
+    counts = db.reset_store(conn, dry_run=True)
+    assert counts["messages"] == 1
+    assert counts["conversations"] == 1
+    # nothing deleted
+    assert conn.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"] == 1
+
+
+def test_reset_store_confirm_wipes_messages_and_conversations(conn):
+    cid = _seed_conv(conn)
+    db.insert_messages(conn, cid, [ingest.MsgRecord(msg_key="x:1", ts=1, content="hi")])
+    db.reset_store(conn, dry_run=False)
+    assert conn.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM conversations").fetchone()["n"] == 0
+
+
+def test_reset_store_keeps_persons(conn):
+    db.upsert_person(conn, id="u1", name="张三", category="biz",
+                     threshold_days=3, aliases=[])
+    _seed_conv(conn)
+    db.reset_store(conn, dry_run=False)
+    assert len(db.get_persons(conn)) == 1
+
+
+def test_reset_store_all_clears_accounts(conn):
+    _seed_conv(conn)
+    db.reset_store(conn, dry_run=False, include_accounts=True)
+    assert db.get_accounts(conn) == []
+
+
+def test_reset_store_channel_scope(conn):
+    c1 = _seed_conv(conn, account_id=1, chat_id="c1")  # wechat
+    db.upsert_account(conn, account_id=2, platform="phone", self_id="me_phone")
+    c2 = db.upsert_conversation(conn, account_id=2, platform="phone",
+                                chat_id="+8613000000001", type="private")
+    db.insert_messages(conn, c1, [ingest.MsgRecord(msg_key="x:1", ts=1, content="a")])
+    db.insert_messages(conn, c2, [ingest.MsgRecord(msg_key="y:1", ts=1, content="b")])
+    db.reset_store(conn, dry_run=False, platform="wechat")
+    plats = [c["platform"] for c in db.get_conversations(conn)]
+    assert plats == ["phone"]
