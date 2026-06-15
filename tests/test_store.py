@@ -355,3 +355,35 @@ def test_persons_overview_only_lists_persons_with_convs(conn):
     assert "lisi" in ids and "nobody" not in ids
     p = [x for x in ov if x["id"] == "lisi"][0]
     assert p["conversations"] == 1 and "wechat" in p["channels"]
+
+
+def test_queue_outbox_creates_pending_with_target(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                 chat_id="wxid_t", name="张三")
+    oid = db.queue_outbox(conn, conversation_id=cid, body="你好", actor="user")
+    rows = db.get_outbox(conn, status="pending")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["id"] == oid and r["body"] == "你好"
+    assert r["platform"] == "wechat" and r["chat_id"] == "wxid_t"
+    assert r["status"] == "pending"
+
+
+def test_queue_outbox_unknown_conversation_raises(conn):
+    import pytest
+    with pytest.raises(ValueError):
+        db.queue_outbox(conn, conversation_id=999, body="x", actor="user")
+
+
+def test_mark_outbox_sent_and_failed(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="w", name="x")
+    oid = db.queue_outbox(conn, conversation_id=cid, body="hi", actor="user")
+    db.mark_outbox(conn, oid, "sent")
+    assert db.get_outbox_row(conn, oid)["status"] == "sent"
+    assert db.get_outbox_row(conn, oid)["sent_at"] is not None
+    assert db.get_outbox(conn, status="pending") == []
+    oid2 = db.queue_outbox(conn, conversation_id=cid, body="hi2", actor="user")
+    db.mark_outbox(conn, oid2, "failed", error="boom")
+    assert db.get_outbox_row(conn, oid2)["error"] == "boom"

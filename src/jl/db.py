@@ -366,6 +366,49 @@ def search_messages(conn, query, *, limit=50, account_id=None):
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
 
+# ----- outbox (human-in-the-loop send queue) --------------------------------
+
+def queue_outbox(conn, *, conversation_id, body, actor=""):
+    """Queue a draft reply (status=pending). Resolves the send target from the
+    conversation. Does NOT send — confirmation happens separately. Returns id."""
+    conv = conn.execute(
+        "SELECT account_id, platform, chat_id FROM conversations WHERE id=?",
+        (conversation_id,)).fetchone()
+    if conv is None:
+        raise ValueError(f"no conversation {conversation_id}")
+    cur = conn.execute(
+        """INSERT INTO outbox (conversation_id, account_id, platform, chat_id, body,
+                               status, created_at, created_by)
+           VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)""",
+        (conversation_id, conv["account_id"], conv["platform"], conv["chat_id"],
+         body, _now(), actor))
+    conn.commit()
+    oid = cur.lastrowid
+    log_event(conn, kind="outbox_queue", actor=actor,
+              detail={"outbox_id": oid, "platform": conv["platform"],
+                      "chat_id": conv["chat_id"]})
+    return oid
+
+
+def get_outbox(conn, status="pending", limit=100):
+    rows = conn.execute(
+        "SELECT * FROM outbox WHERE status=? ORDER BY created_at DESC LIMIT ?",
+        (status, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_outbox_row(conn, outbox_id):
+    r = conn.execute("SELECT * FROM outbox WHERE id=?", (outbox_id,)).fetchone()
+    return dict(r) if r else None
+
+
+def mark_outbox(conn, outbox_id, status, error=""):
+    sent_at = _now() if status == "sent" else None
+    conn.execute("UPDATE outbox SET status=?, error=?, sent_at=? WHERE id=?",
+                 (status, error, sent_at, outbox_id))
+    conn.commit()
+
+
 # ----- reset (destructive; HITL-gated at the CLI layer) ---------------------
 
 def reset_store(conn, *, dry_run=True, platform=None, include_accounts=False):

@@ -128,3 +128,22 @@ class FullWechatAdapter(ingest.IngestAdapter):
         for conv in self.all_conversations(account):
             out.append((conv, self._messages(conv.chat_id, recent_limit, 0)))
         return out
+
+    def send(self, chat_id, text):
+        """Send a text message via fullwechat. Returns (ok, error)."""
+        body = json.dumps({"chatId": chat_id, "text": text}).encode("utf-8")
+        req = urllib.request.Request(self.url + "/api/messages/send", data=body,
+                                     method="POST",
+                                     headers={"Authorization": "Bearer " + self.token,
+                                              "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                res = json.loads(r.read().decode("utf-8", "replace"))
+        except Exception as e:  # surface any transport error to the human
+            return False, str(e)
+        return bool(res.get("success")), res.get("error", "") or ""
+
+
+def send_text(chat_id, text):
+    """Module-level convenience: send via a default FullWechatAdapter."""
+    return FullWechatAdapter().send(chat_id, text)
