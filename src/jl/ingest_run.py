@@ -24,11 +24,13 @@ def ignite(conn, adapter, *, account_id, recent_limit=30, actor="cli"):
     db.log_event(conn, kind="ignite", actor=actor,
                  detail={"account_id": account_id, "conversations": convs,
                          "inserted": inserted})
-    # scoped auto-draft on freshly ingested inbound (LLM-optional; never blocks ingest)
+    # scoped auto-draft on freshly ingested inbound + proactive openers for
+    # watched/🔴 relationships (both LLM-optional; never block ingest, never send)
     try:
         from . import assist, llm
         if llm.available():
             assist.auto_draft_sweep(conn)
+            assist.proactive_sweep(conn)
     except Exception:
         pass
     return inserted

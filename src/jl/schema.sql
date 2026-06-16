@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS persons (
     category       TEXT NOT NULL DEFAULT '',   -- GC0001 / 家人4x / 伴侣5x ...
     threshold_days REAL NOT NULL DEFAULT 7,    -- red-alert threshold
     aliases        TEXT NOT NULL DEFAULT '[]', -- JSON array
+    watch          INTEGER NOT NULL DEFAULT 0, -- 关注: enter the proactive queue regardless of color
     created_at     INTEGER NOT NULL,
     updated_at     INTEGER NOT NULL
 );
@@ -117,6 +118,7 @@ CREATE TABLE IF NOT EXISTS suggestions (
     version_idx     INTEGER NOT NULL DEFAULT 0,
     stance          TEXT NOT NULL DEFAULT '',
     body            TEXT NOT NULL DEFAULT '',
+    kind            TEXT NOT NULL DEFAULT 'reply',      -- reply|opener (proactive)
     llm_provider    TEXT NOT NULL DEFAULT '',
     llm_model       TEXT NOT NULL DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'suggested',  -- suggested|used|dismissed

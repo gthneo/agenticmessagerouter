@@ -29,8 +29,26 @@ def connect(path: str = DEFAULT_DB) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the initial release. CREATE TABLE IF NOT EXISTS only creates
+# them on a fresh DB, so existing DBs (e.g. live .178) need an idempotent ALTER.
+_ADDED_COLUMNS = {
+    "persons": [("watch", "INTEGER NOT NULL DEFAULT 0")],
+    "suggestions": [("kind", "TEXT NOT NULL DEFAULT 'reply'")],
+}
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    for table, cols in _ADDED_COLUMNS.items():
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols:
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    _ensure_columns(conn)
     conn.commit()
 
 
@@ -71,6 +89,14 @@ def get_persons(conn):
 def get_person(conn, person_id):
     row = conn.execute("SELECT * FROM persons WHERE id=?", (person_id,)).fetchone()
     return _person_row(row) if row else None
+
+
+def set_watch(conn, person_id, on=True):
+    """Toggle the 关注 flag — watched persons enter the proactive queue regardless
+    of color. Caller logs the intervention to the events trail (who/when/why)."""
+    conn.execute("UPDATE persons SET watch=?, updated_at=? WHERE id=?",
+                 (1 if on else 0, _now(), person_id))
+    conn.commit()
 
 
 # ----- channels -------------------------------------------------------------
@@ -411,22 +437,27 @@ def mark_outbox(conn, outbox_id, status, error=""):
 
 # ----- suggestions (AI reply-draft candidates) ------------------------------
 
-def add_suggestions(conn, conversation_id, items):
+def add_suggestions(conn, conversation_id, items, *, kind="reply"):
     now = _now()
     for it in items:
         conn.execute(
             """INSERT INTO suggestions (conversation_id, version_idx, stance, body,
-                                        llm_provider, llm_model, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, 'suggested', ?)""",
+                                        kind, llm_provider, llm_model, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'suggested', ?)""",
             (conversation_id, it.get("version_idx", 0), it.get("stance", ""),
-             it.get("body", ""), it.get("llm_provider", ""), it.get("llm_model", ""), now))
+             it.get("body", ""), kind, it.get("llm_provider", ""),
+             it.get("llm_model", ""), now))
     conn.commit()
 
 
-def get_suggestions(conn, conversation_id, status="suggested"):
-    rows = conn.execute(
-        "SELECT * FROM suggestions WHERE conversation_id=? AND status=? ORDER BY version_idx",
-        (conversation_id, status)).fetchall()
+def get_suggestions(conn, conversation_id, status="suggested", kind=None):
+    sql = "SELECT * FROM suggestions WHERE conversation_id=? AND status=?"
+    params = [conversation_id, status]
+    if kind is not None:
+        sql += " AND kind=?"
+        params.append(kind)
+    sql += " ORDER BY version_idx"
+    rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 

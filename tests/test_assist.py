@@ -1,4 +1,6 @@
 """reply-draft assistant — context build, version parse, generate (fake llm)."""
+import time
+
 from jl import assist, db, llm, ingest
 
 
@@ -71,6 +73,109 @@ def test_generate_drafts_llm_unavailable_is_noop():
     fake = lambda messages, **kw: llm.LLMResult(ok=False, error="llm_unavailable")
     n = assist.generate_drafts(conn, cid, n=3, llm_complete=fake)
     assert n == 0 and db.get_suggestions(conn, cid) == []
+
+
+# ---- C / B3: proactive openers ------------------------------------------------
+
+_OPENER = lambda messages, **kw: llm.LLMResult(
+    text="1) 稳妥: 开A\n2) 直接: 开B\n3) 有温度: 开C", ok=True,
+    provider="fake", model="f1", tokens_in=5, tokens_out=9)
+
+
+def test_build_opener_context_uses_opener_guide_and_timeline():
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    msgs = assist.build_opener_context(conn, "u1", playbook="")
+    sysmsg = next(m["content"] for m in msgs if m["role"] == "system")
+    usermsg = next(m["content"] for m in msgs if m["role"] == "user")
+    assert "主动" in sysmsg and "开场" in sysmsg          # opener guide, not the reply guide
+    assert "在吗" in usermsg and "张三" in usermsg         # timeline + person
+
+
+def test_build_opener_context_cold_when_no_history():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    db.upsert_person(conn, id="cold", name="王五", category="biz", threshold_days=7, aliases=[])
+    msgs = assist.build_opener_context(conn, "cold", playbook="")
+    usermsg = next(m["content"] for m in msgs if m["role"] == "user")
+    assert "冷启动" in usermsg or "尚无" in usermsg          # cold-start framing
+
+
+def test_primary_conversation_picks_sendable_private_most_msgs():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    small = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="a", name="张三")
+    db.link_person(conn, small, "u1")
+    db.insert_messages(conn, small, [ingest.MsgRecord(msg_key="s1", ts=9, content="hi", direction="in")])
+    big = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="b", name="张三")
+    db.link_person(conn, big, "u1")
+    db.insert_messages(conn, big, [ingest.MsgRecord(msg_key=f"b{i}", ts=10 + i, content="x", direction="in") for i in range(3)])
+    grp = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="g", name="群", type="group")
+    db.link_person(conn, grp, "u1")
+    pc = assist.primary_conversation(conn, "u1")
+    assert pc is not None and pc["id"] == big          # most-messages private wins, group excluded
+
+
+def test_primary_conversation_none_when_no_conversation():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    db.upsert_person(conn, id="cold", name="王五", category="biz", threshold_days=7, aliases=[])
+    assert assist.primary_conversation(conn, "cold") is None
+
+
+def test_generate_opener_stores_opener_kind():
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    n = assist.generate_opener(conn, "u1", n=3, llm_complete=_OPENER)
+    assert n == 3
+    openers = db.get_suggestions(conn, cid, kind="opener")
+    assert [o["body"] for o in openers] == ["开A", "开B", "开C"]
+    assert db.get_suggestions(conn, cid, kind="reply") == []   # tagged opener, not reply
+
+
+def test_generate_opener_no_conversation_returns_zero():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    db.upsert_person(conn, id="cold", name="王五", category="biz", threshold_days=7, aliases=[])
+    assert assist.generate_opener(conn, "cold", llm_complete=_OPENER) == 0
+
+
+def test_generate_opener_llm_unavailable_is_noop():
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    fake = lambda messages, **kw: llm.LLMResult(ok=False, error="llm_unavailable")
+    assert assist.generate_opener(conn, "u1", llm_complete=fake) == 0
+    assert db.get_suggestions(conn, cid, kind="opener") == []
+
+
+def test_proactive_sweep_scopes_watch_red_and_missing_channel():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    now = int(time.time())
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    # 🔴 overdue (old msg) — enters via color
+    db.upsert_person(conn, id="red", name="张三", category="biz", threshold_days=3, aliases=[])
+    rc = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="r", name="张三")
+    db.link_person(conn, rc, "red")
+    db.insert_messages(conn, rc, [ingest.MsgRecord(msg_key="r1", ts=now - 9 * 86400, content="老消息", direction="in")])
+    # 🟢 fresh but WATCHED — watch overrides color
+    db.upsert_person(conn, id="grn", name="李四", category="biz", threshold_days=14, aliases=[])
+    db.set_watch(conn, "grn", True)
+    gc = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="g", name="李四")
+    db.link_person(conn, gc, "grn")
+    db.insert_messages(conn, gc, [ingest.MsgRecord(msg_key="g1", ts=now - 3600, content="刚聊", direction="in")])
+    # 🟢 fresh, NOT watched — excluded
+    db.upsert_person(conn, id="skip", name="王五", category="biz", threshold_days=14, aliases=[])
+    sc = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="s2", name="王五")
+    db.link_person(conn, sc, "skip")
+    db.insert_messages(conn, sc, [ingest.MsgRecord(msg_key="s1", ts=now - 3600, content="也刚聊", direction="in")])
+    # watched but NO channel → missing_channel (救补)
+    db.upsert_person(conn, id="nochan", name="赵六", category="biz", threshold_days=3, aliases=[])
+    db.set_watch(conn, "nochan", True)
+
+    out = assist.proactive_sweep(conn, llm_complete=_OPENER)
+    drafted = {d["person_id"] for d in out["drafted"]}
+    missing = set(out["missing_channel"])
+    assert drafted == {"red", "grn"}            # 🔴 + watched-🟢
+    assert "skip" not in drafted                # fresh + unwatched excluded
+    assert missing == {"nochan"}                # watched, no send channel → 救补
+    # dedup: a second sweep skips the ones already drafted
+    out2 = assist.proactive_sweep(conn, llm_complete=_OPENER)
+    assert {d["person_id"] for d in out2["drafted"]} == set()
 
 
 def test_auto_draft_sweep_scopes_to_awaiting_private_linked():

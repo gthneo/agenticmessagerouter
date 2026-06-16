@@ -122,6 +122,28 @@ def api_suggestions(conn, conversation_id):
     return db.get_suggestions(conn, conversation_id)
 
 
+def api_proactive(conn):
+    """Read-only 主动联络队列: watched/🔴 persons with their queued opener count and
+    send target. Generation happens in the poll/CLI; the web only surfaces the queue."""
+    from . import assist, weighting
+    out = []
+    for p in db.get_persons(conn):
+        days = assist._person_days(conn, p["id"])
+        is_red = weighting.color(days, p["threshold_days"]) == "🔴"
+        if not (p.get("watch") or is_red):
+            continue
+        conv = assist.primary_conversation(conn, p["id"])
+        openers = db.get_suggestions(conn, conv["id"], kind="opener") if conv else []
+        out.append({
+            "person_id": p["id"], "name": p["name"], "category": p["category"],
+            "watch": bool(p.get("watch")), "red": is_red,
+            "days": round(days, 1) if days is not None else None,
+            "conversation_id": conv["id"] if conv else None,
+            "openers": len(openers), "missing_channel": conv is None,
+        })
+    return out
+
+
 def api_dismiss_suggestion(conn, payload):
     db.set_suggestion_status(conn, int(payload["id"]), "dismissed")
     return {"ok": True}
@@ -178,6 +200,8 @@ def make_handler(db_path):
                     return self._send(200, api_person_timeline(conn, unquote(u.path.split("/")[3])))
                 if u.path == "/api/merge-candidates":
                     return self._send(200, api_merge_candidates(conn))
+                if u.path == "/api/proactive":
+                    return self._send(200, api_proactive(conn))
                 if u.path == "/api/outbox":
                     return self._send(200, api_list_outbox(conn))
                 if u.path.startswith("/api/conversations/") and u.path.endswith("/suggestions"):
@@ -259,6 +283,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 #replybox button{padding:6px 12px;border:1px solid #48a;background:#e8f0fb;color:#147;border-radius:6px;cursor:pointer;white-space:nowrap}
 </style></head><body>
 <div id=side>
+ <div class=sec>📞 该联系谁</div><div id=proactive></div>
  <div class=sec>👤 联系人</div><div id=persons></div>
  <div class=sec>📤 待发送 outbox</div><div id=outbox></div>
  <div class=sec>🔗 待确认归并</div><div id=cands></div>
@@ -312,6 +337,10 @@ async function openPerson(id){const m=await E('/persons/'+encodeURIComponent(id)
  document.getElementById('title').textContent='👤 '+id+' 合并时间线';
  document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
  <span class=badge>${esc(x.platform)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)'}
+async function loadProactive(){const ps=await E('/proactive');document.getElementById('proactive').innerHTML=
+ ps.map(p=>{const tag=p.red?'🔴':(p.watch?'⭐':'');const days=p.days!=null?p.days+'天':'';
+ if(p.missing_channel)return `<div class=conv><div class=n>${tag} ${esc(p.name)} <span class=badge>缺渠道·救补</span></div><div class=p>${days} · 补微信/飞书号再拟</div></div>`;
+ return `<div class=conv onclick="openConv(${p.conversation_id})"><div class=n>${tag} ${esc(p.name)} ${p.openers?`<span class=badge>${p.openers}版开场</span>`:''}</div><div class=p>${days}${p.openers?' · 点开挑/改/发':' · 待拟'}</div></div>`}).join('')||'<div class=p style=padding:8px>(无 关注/🔴 待联络)</div>'}
 async function loadCands(){const cs=await E('/merge-candidates');document.getElementById('cands').innerHTML=
  cs.map(c=>`<div class=cand><div class=n>${esc(c.name)} <span class=badge>${esc(c.platform)}</span></div>
  ${c.candidates.map(p=>`<div class=p>→ ${esc(p.name||p.id)}</div>
@@ -319,12 +348,12 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
 function goHome(){document.getElementById('title').textContent='选择会话';
  document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';
- loadPersons();loadCands();loadConvs();loadOutbox()}
+ loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()}
 async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
  goHome()}
 document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='Enter')return;
  const h=await E('/search','q='+encodeURIComponent(e.target.value));
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
-loadPersons();loadCands();loadConvs();loadOutbox()
+loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()
 </script></body></html>"""

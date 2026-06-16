@@ -45,6 +45,33 @@ def test_api_search_empty_query_returns_empty():
     assert web.api_search(c, "") == []
 
 
+def test_api_proactive_lists_watched_and_red_with_openers():
+    import time
+    c = db.connect(":memory:"); db.init_db(c)
+    now = int(time.time())
+    db.upsert_account(c, account_id=1, platform="wechat", self_id="s")
+    # watched 🟢 with an opener queued
+    db.upsert_person(c, id="w", name="张三", category="biz", threshold_days=14, aliases=[])
+    db.set_watch(c, "w", True)
+    wc = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="w", name="张三", type="private")
+    db.link_person(c, wc, "w")
+    db.insert_messages(c, wc, [ingest.MsgRecord(msg_key="w1", ts=now - 3600, content="刚聊", direction="in")])
+    db.add_suggestions(c, wc, [{"stance": "稳妥", "body": "开场"}], kind="opener")
+    # fresh unwatched → excluded
+    db.upsert_person(c, id="skip", name="李四", category="biz", threshold_days=14, aliases=[])
+    sc = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="s2", name="李四", type="private")
+    db.link_person(c, sc, "skip")
+    db.insert_messages(c, sc, [ingest.MsgRecord(msg_key="s1", ts=now - 3600, content="也刚", direction="in")])
+    # watched, no channel → missing
+    db.upsert_person(c, id="nc", name="王五", category="biz", threshold_days=3, aliases=[])
+    db.set_watch(c, "nc", True)
+
+    rows = {r["person_id"]: r for r in web.api_proactive(c)}
+    assert set(rows) == {"w", "nc"}
+    assert rows["w"]["openers"] == 1 and rows["w"]["missing_channel"] is False
+    assert rows["nc"]["missing_channel"] is True
+
+
 def test_api_messages_bad_id_path_is_404(monkeypatch):
     import threading, time, urllib.request, urllib.error, tempfile
     from jl import web, db

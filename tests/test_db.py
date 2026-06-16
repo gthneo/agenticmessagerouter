@@ -63,6 +63,41 @@ def test_upsert_channel_idempotent_on_person_kind_identifier(conn):
     assert chans[0]["label"] == "王五备注"
 
 
+def test_set_watch_toggles_flag(conn):
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    assert db.get_person(conn, "u1")["watch"] == 0      # default off
+    db.set_watch(conn, "u1", True)
+    assert db.get_person(conn, "u1")["watch"] == 1
+    db.set_watch(conn, "u1", False)
+    assert db.get_person(conn, "u1")["watch"] == 0
+
+
+def test_suggestions_kind_round_trips_and_filters(conn):
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="self")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="w1", name="张三")
+    db.add_suggestions(conn, cid, [{"stance": "稳妥", "body": "回复A"}], kind="reply")
+    db.add_suggestions(conn, cid, [{"stance": "稳妥", "body": "开场B"}], kind="opener")
+    assert len(db.get_suggestions(conn, cid)) == 2                       # kind=None → all
+    openers = db.get_suggestions(conn, cid, kind="opener")
+    assert len(openers) == 1 and openers[0]["body"] == "开场B"
+    assert openers[0]["kind"] == "opener"
+
+
+def test_ensure_columns_adds_missing_on_old_db():
+    # simulate an OLD db created without watch/kind, then re-init → columns added
+    c = db.connect(":memory:")
+    c.executescript(
+        "CREATE TABLE persons (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
+        "category TEXT DEFAULT '', threshold_days REAL DEFAULT 7, aliases TEXT DEFAULT '[]', "
+        "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);")
+    assert "watch" not in {r[1] for r in c.execute("PRAGMA table_info(persons)")}
+    db.init_db(c)   # runs schema (IF NOT EXISTS, no-op for persons) + _ensure_columns
+    cols = {r[1] for r in c.execute("PRAGMA table_info(persons)")}
+    assert "watch" in cols
+    c.close()
+
+
 def test_log_event_appends_audit_trail(conn):
     db.log_event(conn, kind="sweep", person_id=None,
                  actor="user", detail={"red": 2})

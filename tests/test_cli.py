@@ -29,6 +29,17 @@ def test_route_name_is_detail():
     assert cli.route(["张三"]) == ("detail", {"name": "张三"})
 
 
+def test_route_proactive():
+    assert cli.route(["主动"]) == ("proactive", {"name": None})
+    assert cli.route(["proactive"]) == ("proactive", {"name": None})
+    assert cli.route(["主动", "张三"]) == ("proactive", {"name": "张三"})
+
+
+def test_route_watch_toggle():
+    assert cli.route(["关注", "张三"]) == ("watch", {"name": "张三", "on": True})
+    assert cli.route(["关注", "--off", "张三"]) == ("watch", {"name": "张三", "on": False})
+
+
 # ----- command wiring (messages-derived path, real in-memory db) ------------
 
 @pytest.fixture

@@ -73,6 +73,12 @@ def route(args):
     if a == "draft-assist":
         cid = args[1] if len(args) > 1 and not args[1].startswith("--") else None
         return ("draft_assist", {"conversation_id": int(cid) if cid else None})
+    if a in ("主动", "proactive"):
+        name = next((x for x in args[1:] if not x.startswith("--")), None)
+        return ("proactive", {"name": name})
+    if a in ("关注", "--watch"):
+        name = next((x for x in args[1:] if not x.startswith("--")), None)
+        return ("watch", {"name": name, "on": "--off" not in args})
     return ("detail", {"name": a})
 
 
@@ -283,6 +289,58 @@ def cmd_draft_assist(conn, ctx):
         print(f"✨ 自动拟稿: {len(touched)} 个待回会话已生成话术")
 
 
+def cmd_watch(conn, ctx):
+    name = ctx.get("name")
+    on = ctx.get("on", True)
+    p = _find_person(conn, name) if name else None
+    if not p:
+        print(f"❌ 找不到 {name}. 先 jl --migrate / link 建档。")
+        return
+    db.set_watch(conn, p["id"], on)
+    db.log_event(conn, kind="watch", person_id=p["id"], actor=_actor(),
+                 detail={"on": on})
+    print(f"{'⭐ 已关注' if on else '☆ 已取消关注'}: {p['name']}"
+          + ("(进入主动联络队列)" if on else ""))
+
+
+def cmd_proactive(conn, ctx):
+    from . import assist, llm
+    name = ctx.get("name")
+    if name:
+        p = _find_person(conn, name)
+        if not p:
+            print(f"❌ 找不到 {name}.")
+            return
+        if not llm.available():
+            print("⚠️ 未配置 LLM——主动话术不可用,但红榜仍告诉你该联系谁。(LLM-optional)")
+            return
+        n = assist.generate_opener(conn, p["id"])
+        if n > 0:
+            print(f"📞 {p['name']}: 拟好 {n} 版开场白(去收件箱挑/改/发)")
+        else:
+            print(f"⚠️ {p['name']}: 缺可发渠道(微信/飞书),已应入救补——补好渠道再拟。")
+        return
+    # full sweep
+    if not llm.available():
+        print("⚠️ 未配置 LLM——只列该联系谁,不自动拟话术。(LLM-optional)")
+    out = assist.proactive_sweep(conn) if llm.available() else {"drafted": [], "missing_channel": []}
+    print(f"\n📞 主动联络队列 — {time.strftime('%Y-%m-%d %H:%M')}")
+    if out["drafted"]:
+        print("✨ 已拟开场白(去收件箱挑/改/发):")
+        for d in out["drafted"]:
+            p = db.get_person(conn, d["person_id"])
+            print(f"  • {p['name']:<14} → 会话 {d['conversation_id']}")
+    if out["missing_channel"]:
+        print("\n⚠️ 想主动联系但缺渠道(入救补,补微信/飞书号再拟):")
+        for pid in out["missing_channel"]:
+            p = db.get_person(conn, pid)
+            print(f"  • {p['name']}")
+    if not out["drafted"] and not out["missing_channel"]:
+        print("  (无 关注/🔴 待联络的人,或都已拟好)")
+    db.log_event(conn, kind="proactive", actor=_actor(),
+                 detail={"drafted": len(out["drafted"]), "missing": len(out["missing_channel"])})
+
+
 # ----- helpers --------------------------------------------------------------
 
 def _find_person(conn, name):
@@ -341,6 +399,10 @@ def main(argv=None):
         cmd_link(conn, ctx)
     elif command == "draft_assist":
         ctx.update(params); cmd_draft_assist(conn, ctx)
+    elif command == "proactive":
+        ctx.update(params); cmd_proactive(conn, ctx)
+    elif command == "watch":
+        ctx.update(params); cmd_watch(conn, ctx)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()
