@@ -163,6 +163,18 @@ CREATE TABLE IF NOT EXISTS commitments (
 );
 CREATE INDEX IF NOT EXISTS idx_commitments_matter ON commitments(matter_id);
 
+-- SELF(自我): the user's OWN identities across channels (中心节点, NOT a contact).
+-- Multi-channel × multi-identity, flat, each tagged with a persona 面具.
+CREATE TABLE IF NOT EXISTS self_identities (
+    id         INTEGER PRIMARY KEY,
+    kind       TEXT NOT NULL,                  -- wechat/phone/feishu/xhs/wecom...
+    identifier TEXT NOT NULL,                  -- wxid / phone(canon) / open_id ...
+    persona    TEXT NOT NULL DEFAULT '自我',    -- 自我 / AI分身 / 经营 (configurable)
+    label      TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    UNIQUE (kind, identifier)
+);
+
 -- full-text search (trigram = CJK substring; NOTE: only matches queries >= 3 chars,
 -- so the search layer uses a LIKE fallback for shorter queries)
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

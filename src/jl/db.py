@@ -248,6 +248,8 @@ def endpoints_with_recency(conn, person_id):
     for c in get_conversations(conn, person_id=person_id):
         kind = c["platform"]
         ident = _canon_identifier(kind, c["chat_id"])
+        if is_self(conn, kind, ident):
+            continue   # never route a contact to one of the user's OWN identities
         n, last_ts = conn.execute(
             "SELECT COUNT(*), COALESCE(MAX(ts), 0) FROM messages WHERE conversation_id=?",
             (c["id"],)).fetchone()
@@ -732,6 +734,115 @@ def get_commitments(conn, matter_id):
 def set_commitment_status(conn, commitment_id, status):
     conn.execute("UPDATE commitments SET status=? WHERE id=?", (status, commitment_id))
     conn.commit()
+
+
+# ----- SELF(自我) identity registry -----------------------------------------
+
+def add_self_identity(conn, kind, identifier, persona="自我", label=""):
+    """Declare one of the user's OWN identities (HITL). phone stored canonical."""
+    ident = _canon_identifier(kind, identifier)
+    conn.execute(
+        """INSERT INTO self_identities (kind, identifier, persona, label, created_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(kind, identifier) DO UPDATE SET persona=excluded.persona,
+                                                       label=excluded.label""",
+        (kind, ident, persona, label, _now()))
+    conn.commit()
+
+
+def get_self_identities(conn):
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM self_identities ORDER BY kind, identifier")]
+
+
+def remove_self_identity(conn, kind, identifier):
+    conn.execute("DELETE FROM self_identities WHERE kind=? AND identifier=?",
+                 (kind, _canon_identifier(kind, identifier)))
+    conn.commit()
+
+
+def is_self(conn, kind, identifier):
+    """True if (kind, identifier) is one of the user's own identities (phone via canon)."""
+    ident = _canon_identifier(kind, identifier)
+    return conn.execute("SELECT 1 FROM self_identities WHERE kind=? AND identifier=?",
+                        (kind, ident)).fetchone() is not None
+
+
+def seed_self_from_accounts(conn):
+    """Auto-register each account's self_id as a SELF identity (persona 自我). Returns count."""
+    n = 0
+    for a in get_accounts(conn):
+        sid = (a.get("self_id") or "").strip()
+        if sid:
+            before = is_self(conn, a["platform"], sid)
+            add_self_identity(conn, a["platform"], sid, persona="自我", label=a.get("label", ""))
+            if not before:
+                n += 1
+    return n
+
+
+_SELF_NAME_HINTS = ("我", "本人", "自己", "文件传输助手", "filehelper")
+
+
+def suggest_self_identities(conn):
+    """Auto-SUGGEST the user's own identities for HITL checkbox confirm (never auto-add):
+    every account self_id not yet registered, plus conversations whose contact label hints
+    at self (我/本人/文件传输助手...). Returns [{kind, identifier, name, reason}]."""
+    out, seen = [], {(s["kind"], s["identifier"]) for s in get_self_identities(conn)}
+    for a in get_accounts(conn):
+        sid = (a.get("self_id") or "").strip()
+        key = (a["platform"], _canon_identifier(a["platform"], sid))
+        if sid and key not in seen:
+            seen.add(key)
+            out.append({"kind": a["platform"], "identifier": sid,
+                        "name": a.get("label", ""), "reason": "账号 self_id"})
+    for c in conn.execute("SELECT platform, chat_id, name FROM conversations WHERE name != ''"):
+        key = (c["platform"], _canon_identifier(c["platform"], c["chat_id"]))
+        if key in seen:
+            continue
+        if any(h in c["name"] for h in _SELF_NAME_HINTS):
+            seen.add(key)
+            out.append({"kind": c["platform"], "identifier": c["chat_id"],
+                        "name": c["name"], "reason": f"名字含自我标记"})
+    return out
+
+
+def conversation_is_self(conn, conversation_id):
+    """True if a conversation's peer is one of the user's own identities (self-chat)."""
+    r = conn.execute("SELECT platform, chat_id FROM conversations WHERE id=?",
+                     (conversation_id,)).fetchone()
+    return bool(r) and is_self(conn, r["platform"], r["chat_id"])
+
+
+def apply_self_directions(conn):
+    """出站识别: mark messages whose sender is a SELF identity as direction='out' (我).
+    Resolves 'who said what' once self is declared. Idempotent. Returns rows updated."""
+    selfs = get_self_identities(conn)
+    ids = [s["identifier"] for s in selfs]
+    if not ids:
+        return 0
+    q = ",".join("?" for _ in ids)
+    cur = conn.execute(
+        f"UPDATE messages SET direction='out' WHERE direction!='out' AND sender_id IN ({q})",
+        ids)
+    conn.commit()
+    return cur.rowcount
+
+
+def reunify(conn, *, reset=False):
+    """启动/复位归一. reset=True first clears AUTO-linked conversations (keeps human-confirmed
+    links — never destroys human work), then re-links by strong signal. Returns stats."""
+    if reset:
+        # auto-links have no 'link' event; human-confirmed ones do → keep those.
+        confirmed = {e["detail"].get("conversation_id") for e in get_events(conn, limit=100000)
+                     if e["kind"] == "link" and isinstance(e.get("detail"), dict)}
+        for c in get_conversations(conn):
+            if c.get("person_id") and c["id"] not in confirmed:
+                conn.execute("UPDATE conversations SET person_id=NULL WHERE id=?", (c["id"],))
+        conn.commit()
+    linked = link_conversations(conn)
+    apply_self_directions(conn)
+    return {"linked": linked, "candidates": len(suggest_merges(conn))}
 
 
 # ----- reset (destructive; HITL-gated at the CLI layer) ---------------------
