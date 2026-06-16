@@ -210,6 +210,42 @@ def set_muted(conn, conversation_id, muted):
     conn.commit()
 
 
+def dedup_phone_conversations(conn):
+    """Merge phone conversations that are format-variants of the SAME number (e.g.
+    '13686472775' and '+8613686472775') into one canonical conversation. Distinct
+    numbers under a person are preserved. Returns the count of conversations folded.
+    Messages move with INSERT OR IGNORE on (conversation_id, msg_key) to absorb overlap."""
+    from .channels.phone import canon_phone
+    rows = conn.execute(
+        "SELECT id, chat_id, account_id, person_id, "
+        "(SELECT COUNT(*) FROM messages m WHERE m.conversation_id=conversations.id) n "
+        "FROM conversations WHERE platform='phone'").fetchall()
+    groups = {}
+    for r in rows:
+        groups.setdefault((r["account_id"], canon_phone(r["chat_id"])), []).append(dict(r))
+    folded = 0
+    for (account_id, canon), convs in groups.items():
+        if len(convs) < 2:
+            # still canonicalize a lone conv's chat_id so future ingests align
+            c = convs[0]
+            if c["chat_id"] != canon and canon:
+                conn.execute("UPDATE conversations SET chat_id=? WHERE id=?", (canon, c["id"]))
+            continue
+        convs.sort(key=lambda c: (-c["n"], c["id"]))   # keep the richest (then oldest)
+        keep = convs[0]
+        for dup in convs[1:]:
+            conn.execute(
+                "UPDATE OR IGNORE messages SET conversation_id=? WHERE conversation_id=?",
+                (keep["id"], dup["id"]))
+            conn.execute("DELETE FROM messages WHERE conversation_id=?", (dup["id"],))
+            conn.execute("DELETE FROM conversations WHERE id=?", (dup["id"],))
+            folded += 1
+        if keep["chat_id"] != canon and canon:
+            conn.execute("UPDATE conversations SET chat_id=? WHERE id=?", (canon, keep["id"]))
+    conn.commit()
+    return folded
+
+
 def link_person(conn, conversation_id, person_id):
     conn.execute("UPDATE conversations SET person_id=?, updated_at=? WHERE id=?",
                  (person_id, _now(), conversation_id))

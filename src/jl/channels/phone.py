@@ -23,6 +23,19 @@ def norm_phone(s):
     return re.sub(r"\D", "", s or "")
 
 
+def canon_phone(s):
+    """Canonical comparable id: digits only, mainland country code 86 and the leading
+    domestic-trunk 0 stripped, so '+86 136…' / '8613…' / '013…' / '136…' all collapse
+    to one id. Non-CN numbers are left intact. One person can still hold several of
+    these (distinct numbers stay distinct); only format-variants of the SAME number merge."""
+    d = norm_phone(s)
+    if len(d) > 11 and d.startswith("86"):
+        d = d[2:]
+    if len(d) == 12 and d.startswith("0"):
+        d = d[1:]
+    return d
+
+
 # Minimum trailing digits that must coincide before two numbers are deemed the
 # same contact — blocks short-fragment suffix collisions while staying tolerant
 # of country-code prefixes (a CN mobile shares 11 digits).
@@ -125,12 +138,13 @@ def conversations_from_calls(rows, name_resolver=resolve_contact):
     groups = {}
     for r in rows:
         num = r.get("ZADDRESS") or ""
-        groups.setdefault(num, []).append(r)
+        groups.setdefault(canon_phone(num) or num, []).append((num, r))
     out = []
-    for num, grp in groups.items():
-        msgs = [map_call(r) for r in grp]
+    for cid, grp in groups.items():
+        msgs = [map_call(r) for _, r in grp]
         last_ts = max((m.ts for m in msgs), default=None)
-        conv = ingest.ConvRecord(chat_id=num, name=name_resolver(num) or "",
+        raw_num = grp[0][0]  # resolve the contact name from an original (formatted) number
+        conv = ingest.ConvRecord(chat_id=cid, name=name_resolver(raw_num) or "",
                                  type="private", last_activity_at=last_ts)
         out.append((conv, msgs))
     return out

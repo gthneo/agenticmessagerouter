@@ -83,6 +83,8 @@ def route(args):
         rest = [x for x in args[1:] if not x.startswith("--")]
         return ("connect", {"name": rest[0] if rest else None,
                             "chat_id": rest[1] if len(rest) > 1 else None})
+    if a in ("电话归一", "dedup-phone"):
+        return ("dedup_phone", {})
     return ("detail", {"name": a})
 
 
@@ -293,6 +295,13 @@ def cmd_draft_assist(conn, ctx):
         print(f"✨ 自动拟稿: {len(touched)} 个待回会话已生成话术")
 
 
+def cmd_dedup_phone(conn, ctx):
+    n = db.dedup_phone_conversations(conn)
+    db.log_event(conn, kind="dedup_phone", actor=_actor(), detail={"folded": n})
+    print(f"📞 电话归一: 合并了 {n} 条同号重复会话(+86/格式变体)，号码已规范化。"
+          if n else "📞 电话归一: 无重复(号码已规范)。")
+
+
 def cmd_connect(conn, ctx):
     """Link a person to a live fullwechat chat id, pulling its recent messages so the
     chat becomes a real (sendable) send target. Fixes 'reachable-but-not-linked' people
@@ -435,6 +444,8 @@ def main(argv=None):
         ctx.update(params); cmd_watch(conn, ctx)
     elif command == "connect":
         ctx.update(params); cmd_connect(conn, ctx)
+    elif command == "dedup_phone":
+        cmd_dedup_phone(conn, ctx)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()

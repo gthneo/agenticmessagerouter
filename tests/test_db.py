@@ -98,6 +98,31 @@ def test_ensure_columns_adds_missing_on_old_db():
     c.close()
 
 
+def test_dedup_phone_conversations_merges_format_variants(conn):
+    from jl import ingest
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=2, platform="phone", self_id="me")
+    # same number, two formats → two conversations (the bug)
+    a = db.upsert_conversation(conn, account_id=2, platform="phone", chat_id="13686472775", name="张三")
+    b = db.upsert_conversation(conn, account_id=2, platform="phone", chat_id="+8613686472775", name="张三")
+    # a genuinely DIFFERENT number under the same person — must stay separate
+    d = db.upsert_conversation(conn, account_id=2, platform="phone", chat_id="13760177688", name="张三")
+    for cid in (a, b, d):
+        db.link_person(conn, cid, "u1")
+    db.insert_messages(conn, a, [ingest.MsgRecord(msg_key="p:1", ts=10, content="[通话]", direction="in")])
+    db.insert_messages(conn, b, [ingest.MsgRecord(msg_key="p:2", ts=20, content="[通话]", direction="out")])
+    db.insert_messages(conn, d, [ingest.MsgRecord(msg_key="p:3", ts=30, content="[通话]", direction="in")])
+
+    merged = db.dedup_phone_conversations(conn)
+    assert merged == 1                                   # one duplicate folded
+    convs = db.get_conversations(conn, person_id="u1")
+    ids = sorted(c["chat_id"] for c in convs)
+    assert ids == ["13686472775", "13760177688"]         # canonical kept, distinct stays
+    kept = next(c for c in convs if c["chat_id"] == "13686472775")
+    n = conn.execute("SELECT COUNT(*) FROM messages WHERE conversation_id=?", (kept["id"],)).fetchone()[0]
+    assert n == 2                                         # both calls merged onto the kept conv
+
+
 def test_log_event_appends_audit_trail(conn):
     db.log_event(conn, kind="sweep", person_id=None,
                  actor="user", detail={"red": 2})
