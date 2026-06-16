@@ -213,3 +213,34 @@ def test_api_cancel_outbox():
     web.api_cancel_outbox(c, {"id": oid})
     assert db.get_outbox_row(c, oid)["status"] == "canceled"
     assert db.get_outbox(c, status="pending") == []
+
+
+def _sg_conv(c):
+    db.upsert_account(c, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="w", name="张三")
+    db.add_suggestions(c, cid, [{"version_idx": 0, "stance": "稳妥", "body": "稳妥版",
+                                 "llm_provider": "fake", "llm_model": "f1"}])
+    return cid
+
+
+def test_api_suggestions_lists_for_conversation():
+    c = db.connect(":memory:"); db.init_db(c); cid = _sg_conv(c)
+    rows = web.api_suggestions(c, cid)
+    assert len(rows) == 1 and rows[0]["body"] == "稳妥版"
+
+
+def test_api_dismiss_suggestion():
+    c = db.connect(":memory:"); db.init_db(c); cid = _sg_conv(c)
+    sid = web.api_suggestions(c, cid)[0]["id"]
+    res = web.api_dismiss_suggestion(c, {"id": sid})
+    assert res["ok"] is True and web.api_suggestions(c, cid) == []
+
+
+def test_api_generate_drafts_llm_optional(monkeypatch):
+    c = db.connect(":memory:"); db.init_db(c)
+    db.upsert_account(c, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="w", name="张三")
+    from jl import llm
+    monkeypatch.setattr(llm, "available", lambda: False)
+    res = web.api_generate_drafts(c, {"conversation_id": cid})
+    assert res["ok"] is False and "llm" in res["error"].lower()

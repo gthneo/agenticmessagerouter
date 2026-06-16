@@ -82,6 +82,21 @@ jl push phone --remote http://192.168.31.178:8088 --token <web_token>   # 电话
 - `account_id`:wechat=1、phone=2(8-bit 多账号)。摄取=收集**自己的**数据(非对外发送),与 ignite/poll 同类,不走发送审批门。
 - 飞书(lark-cli)/企微(wecom-cli)**CLI 跨平台,装在 .178 本地跑**(account feishu=3 / wecom),`jl ignite lark` 直接本地入库,**不用 push**(与 fullwechat 同)。前置:在 .178 `lark-cli auth login --as user` 且 App 含 `im:chat:read`/`im:message:read` scope。当前飞书覆盖**群/话题**;P2P 私聊、发件人名解析、out 方向判定为后续。
 
+## 话术助手(B2 · LLM-optional)
+
+收到消息时,AMR 可拟多版回复话术供你挑/改/发(不自动发,仍走 outbox 审批):
+
+```sh
+jl draft-assist <conv>   # 给某会话生成多版话术(进 suggestions)
+jl draft-assist          # 对"私聊·已关联人·待回"会话批量自动拟(scoped)
+```
+
+- **机制**:`llm.py` 薄抽象层(Claude 首接,多provider-ready)→ `assist.py` 拼上下文(该人合并时间线 + 类别/染色 + 话术守则:做成生意/不树敌/给确定/糙而真)→ 出 2–3 版不同档位 → 存 `suggestions` 表(**不污染 outbox**)。Web 收件箱会话下显示「✨ AI 拟话术 / 用此版 / ✕」,挑一版填回复框 → 现有 confirm→send。
+- **LLM-optional**(核心铁律):没配 `ANTHROPIC_API_KEY` → 助手显示"未配置 LLM"、手敲照常,读/搜/发**全不受影响**。配上 key(`.178` env)即自动启用。模型全挂,人仍在回路。
+- **Token**:每次 LLM 调用记入 `tokens` 表(`jl --tokens` 看);不怕花、必统计。
+- **触发**:`jl draft-assist` 按需 + poll/ignite 后 scoped 自动拟(群/官号/已回/已拟 跳过)。
+- **后续**:1b 注入 M1–M8 方法引擎 +《影响力》;1c 渐进自治(采纳率高→Agent 提议该人全自动,人批准入白名单);Ollama@.156 + 路由。
+
 ## 人归一(③ · 跨渠道同一个人）
 
 同一个人散在微信/电话/…的会话,归到一个 person,看**合并时间线**:

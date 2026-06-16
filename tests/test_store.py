@@ -387,3 +387,26 @@ def test_mark_outbox_sent_and_failed(conn):
     oid2 = db.queue_outbox(conn, conversation_id=cid, body="hi2", actor="user")
     db.mark_outbox(conn, oid2, "failed", error="boom")
     assert db.get_outbox_row(conn, oid2)["error"] == "boom"
+
+
+def test_suggestions_add_get_status(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="w", name="张三")
+    db.add_suggestions(conn, cid, [
+        {"version_idx": 0, "stance": "稳妥", "body": "稳妥版", "llm_provider": "fake", "llm_model": "f1"},
+        {"version_idx": 1, "stance": "直接", "body": "直接版", "llm_provider": "fake", "llm_model": "f1"},
+    ])
+    rows = db.get_suggestions(conn, cid)
+    assert len(rows) == 2 and rows[0]["status"] == "suggested"
+    sid = rows[0]["id"]
+    db.set_suggestion_status(conn, sid, "dismissed")
+    assert len(db.get_suggestions(conn, cid)) == 1
+
+
+def test_clear_suggestions(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="w", name="x")
+    db.add_suggestions(conn, cid, [{"version_idx": 0, "stance": "x", "body": "b",
+                                    "llm_provider": "f", "llm_model": "m"}])
+    db.clear_suggestions(conn, cid)
+    assert db.get_suggestions(conn, cid) == []

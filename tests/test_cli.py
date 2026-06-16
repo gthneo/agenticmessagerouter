@@ -174,3 +174,11 @@ def test_route_push_defaults_channel_phone():
 
 def test_route_link():
     assert cli.route(["link"]) == ("link", {})
+
+
+def test_route_draft_assist():
+    assert cli.route(["draft-assist", "5"]) == ("draft_assist", {"conversation_id": 5})
+
+
+def test_route_draft_assist_missing_id():
+    assert cli.route(["draft-assist"]) == ("draft_assist", {"conversation_id": None})

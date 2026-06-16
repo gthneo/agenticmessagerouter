@@ -118,6 +118,23 @@ def api_cancel_outbox(conn, payload):
     return {"ok": True}
 
 
+def api_suggestions(conn, conversation_id):
+    return db.get_suggestions(conn, conversation_id)
+
+
+def api_dismiss_suggestion(conn, payload):
+    db.set_suggestion_status(conn, int(payload["id"]), "dismissed")
+    return {"ok": True}
+
+
+def api_generate_drafts(conn, payload):
+    from . import assist, llm
+    if not llm.available():
+        return {"ok": False, "error": "LLM 未配置(ANTHROPIC_API_KEY)"}
+    n = assist.generate_drafts(conn, int(payload["conversation_id"]))
+    return {"ok": n > 0, "count": n}
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -163,6 +180,12 @@ def make_handler(db_path):
                     return self._send(200, api_merge_candidates(conn))
                 if u.path == "/api/outbox":
                     return self._send(200, api_list_outbox(conn))
+                if u.path.startswith("/api/conversations/") and u.path.endswith("/suggestions"):
+                    try:
+                        cid = int(u.path.split("/")[3])
+                    except (ValueError, IndexError):
+                        return self._send(404, {"error": "bad conversation id"})
+                    return self._send(200, api_suggestions(conn, cid))
                 return self._send(404, {"error": "not found"})
             finally:
                 conn.close()
@@ -173,7 +196,8 @@ def make_handler(db_path):
             if not _auth_ok(self.headers, params):
                 return self._send(401, {"error": "unauthorized"})
             if u.path not in ("/api/ingest", "/api/link", "/api/outbox",
-                              "/api/outbox/confirm", "/api/outbox/cancel"):
+                              "/api/outbox/confirm", "/api/outbox/cancel",
+                              "/api/suggestions/dismiss", "/api/draft-assist"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -190,6 +214,10 @@ def make_handler(db_path):
                     return self._send(200, api_queue_outbox(conn, payload))
                 if u.path == "/api/outbox/confirm":
                     return self._send(200, api_confirm_outbox(conn, payload))
+                if u.path == "/api/suggestions/dismiss":
+                    return self._send(200, api_dismiss_suggestion(conn, payload))
+                if u.path == "/api/draft-assist":
+                    return self._send(200, api_generate_drafts(conn, payload))
                 return self._send(200, api_cancel_outbox(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
@@ -237,8 +265,10 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  <div class=sec>💬 会话</div>
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
 <div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button><b id=title>选择会话</b></div><div id=msgs></div>
+ <div id=suggest></div>
  <div id=replybox><textarea id=reply rows=2 placeholder="草拟回复…（确认后才会发送）"></textarea>
- <button onclick="draft()">草拟回复 → outbox</button></div></div>
+ <button onclick="draft()">草拟回复 → outbox</button>
+ <button onclick="aiDraft()">✨ AI 拟话术</button></div></div>
 <script>
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
@@ -250,7 +280,19 @@ async function loadConvs(){const c=await E('/conversations');document.getElement
  <div class=p>${esc(x.platform)} · ${fmt(x.last_activity_at)}</div></div>`).join('')}
 async function openConv(id){window.CURCONV=id;const m=await E('/conversations/'+id+'/messages');
  document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
- <span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)'}
+ <span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)';
+ loadSuggestions(id)}
+window.SUG={};
+async function loadSuggestions(id){const s=await E('/conversations/'+id+'/suggestions');
+ window.SUG={};s.forEach(x=>window.SUG[x.id]=x.body);
+ document.getElementById('suggest').innerHTML=(s.length?'<div class=p>✨ 话术建议（挑一版填入回复框）:</div>':'')+
+ s.map(x=>`<div class=ob><div class=p>[${esc(x.stance)}]</div><div class=b>${esc(x.body)}</div>
+ <button onclick="useDraft(${x.id})">用此版</button> <button onclick="dismissSug(${x.id})">✕</button></div>`).join('')}
+function useDraft(id){document.getElementById('reply').value=window.SUG[id]||'';}
+async function aiDraft(){if(!window.CURCONV){alert('先选会话');return}
+ const r=await P('/draft-assist',{conversation_id:window.CURCONV});
+ if(!r.ok){alert(r.error||'LLM 不可用');return}loadSuggestions(window.CURCONV)}
+async function dismissSug(id){await P('/suggestions/dismiss',{id});loadSuggestions(window.CURCONV)}
 async function draft(){if(!window.CURCONV){alert('先选会话');return}
  const ta=document.getElementById('reply'),body=ta.value.trim();if(!body)return;
  await P('/outbox',{conversation_id:window.CURCONV,body});ta.value='';loadOutbox()}
@@ -276,7 +318,8 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
  <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`).join('')}
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
 function goHome(){document.getElementById('title').textContent='选择会话';
- document.getElementById('msgs').innerHTML='';loadPersons();loadCands();loadConvs();loadOutbox()}
+ document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';
+ loadPersons();loadCands();loadConvs();loadOutbox()}
 async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
  goHome()}
 document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='Enter')return;
