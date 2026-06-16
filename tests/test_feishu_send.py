@@ -37,3 +37,17 @@ def test_send_message_dispatches_feishu(monkeypatch):
     monkeypatch.setitem(send.SENDERS, "feishu", _f)
     ok, err = send.send_message("feishu", "oc_chat", "hi")
     assert ok is True and rec["c"] == ("oc_chat", "hi")
+
+
+def test_lark_send_ok_none_with_message_id_is_success(monkeypatch):
+    a = lark.LarkAdapter()
+    monkeypatch.setattr(a, "_run", lambda args: {"ok": None, "data": {"message_id": "om_y"}})
+    ok, err = a.send("oc_chat", "hi")
+    assert ok is True and err == ""
+
+
+def test_lark_send_ok_none_without_message_id_is_failure(monkeypatch):
+    a = lark.LarkAdapter()
+    monkeypatch.setattr(a, "_run", lambda args: {"ok": None, "data": {}})
+    ok, err = a.send("oc_chat", "hi")
+    assert ok is False

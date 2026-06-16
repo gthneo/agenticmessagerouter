@@ -102,11 +102,13 @@ class LarkAdapter(ingest.IngestAdapter):
                            "--text", text, "--as", "user"])
         except Exception as e:  # subprocess/transport failure → surface to human
             return False, str(e)
-        if d.get("ok") is False:
-            err = d.get("error")
-            msg = err.get("message") if isinstance(err, dict) else str(err)
-            return False, msg or "send failed"
-        return True, ""
+        # success = explicit ok:true OR a returned message_id; ok:None without a
+        # message_id is ambiguous → treat as failure, hand back to the human.
+        if d.get("ok") is True or (d.get("data") or {}).get("message_id"):
+            return True, ""
+        err = d.get("error")
+        msg = err.get("message") if isinstance(err, dict) else (str(err) if err else "")
+        return False, msg or "send failed (ambiguous response)"
 
     def all_conversations(self, account):
         chats = self._paged(["im", "+chat-list", "--as", "user"], "chats")
