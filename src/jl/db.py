@@ -781,14 +781,13 @@ def seed_self_from_accounts(conn):
     return n
 
 
-_SELF_NAME_HINTS = ("我", "本人", "自己", "文件传输助手", "filehelper")
-
-
 def suggest_self_identities(conn):
-    """Auto-SUGGEST the user's own identities for HITL checkbox confirm (never auto-add):
-    every account self_id not yet registered, plus conversations whose contact label hints
-    at self (我/本人/文件传输助手...). Returns [{kind, identifier, name, reason}]."""
-    out, seen = [], {(s["kind"], s["identifier"]) for s in get_self_identities(conn)}
+    """Auto-SUGGEST the user's own identities for HITL confirm (never auto-add). ONLY a
+    high-confidence signal: each account's own self_id (the login identity we ingest FROM).
+    Name-based guessing was removed — it surfaced garbage (文件传输助手, multi-name contacts)
+    and missed the real selves. Declare the rest via mark_person_self / explicit add."""
+    seen = {(s["kind"], s["identifier"]) for s in get_self_identities(conn)}
+    out = []
     for a in get_accounts(conn):
         sid = (a.get("self_id") or "").strip()
         key = (a["platform"], _canon_identifier(a["platform"], sid))
@@ -796,15 +795,24 @@ def suggest_self_identities(conn):
             seen.add(key)
             out.append({"kind": a["platform"], "identifier": sid,
                         "name": a.get("label", ""), "reason": "账号 self_id"})
-    for c in conn.execute("SELECT platform, chat_id, name FROM conversations WHERE name != ''"):
-        key = (c["platform"], _canon_identifier(c["platform"], c["chat_id"]))
-        if key in seen:
-            continue
-        if any(h in c["name"] for h in _SELF_NAME_HINTS):
-            seen.add(key)
-            out.append({"kind": c["platform"], "identifier": c["chat_id"],
-                        "name": c["name"], "reason": f"名字含自我标记"})
     return out
+
+
+def mark_person_self(conn, person_id, persona="自我"):
+    """Declare a wrongly-contacted person as actually the USER: their channel ids + their
+    conversations' peer ids become SELF identities, their conversations are unlinked, and the
+    person record is removed. HITL — fixes 'my own account got listed as a contact'."""
+    p = get_person(conn, person_id)
+    if not p:
+        return 0
+    for ch in get_channels(conn, person_id):
+        add_self_identity(conn, ch["kind"], ch["identifier"], persona=persona, label=p["name"])
+    for c in get_conversations(conn, person_id=person_id):
+        add_self_identity(conn, c["platform"], c["chat_id"], persona=persona, label=p["name"])
+        conn.execute("UPDATE conversations SET person_id=NULL WHERE id=?", (c["id"],))
+    conn.execute("DELETE FROM persons WHERE id=?", (person_id,))
+    conn.commit()
+    return len(get_self_identities(conn))
 
 
 def conversation_is_self(conn, conversation_id):

@@ -30,12 +30,24 @@ def test_seed_self_from_accounts():
     assert n == 1 and db.is_self(c, "wechat", "wxid_me")
 
 
-def test_suggest_self_identities_from_account_and_name_hint():
+def test_suggest_self_identities_only_account_selfid_no_name_garbage():
     c = _seed()
-    cid = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="filehelper", name="文件传输助手")
+    # a contact mislabeled with "我" must NOT be suggested as self (name-guess removed)
+    db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="filehelper", name="文件传输助手")
+    db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="wxid_mix", name="Roy/我/Connie")
     sug = {(s["kind"], s["identifier"]) for s in db.suggest_self_identities(c)}
-    assert ("wechat", "wxid_me") in sug                 # account self_id suggested
-    assert ("wechat", "filehelper") in sug              # name-hint suggested
+    assert sug == {("wechat", "wxid_me")}               # only the account self_id, no garbage
+
+
+def test_mark_person_self_converts_contact_to_self():
+    c = _seed()
+    db.upsert_person(c, id="renxiong", name="仁兄", category="biz", threshold_days=7, aliases=[])
+    cv = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="wangliren123", name="仁兄")
+    db.link_person(c, cv, "renxiong")
+    db.mark_person_self(c, "renxiong")
+    assert db.is_self(c, "wechat", "wangliren123")       # their id is now SELF
+    assert db.get_person(c, "renxiong") is None          # the wrong contact is gone
+    assert db.get_conversation(c, cv)["person_id"] is None  # conv unlinked (becomes self-chat)
 
 
 def test_apply_self_directions_marks_my_messages_out():

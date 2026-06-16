@@ -298,9 +298,9 @@ def test_api_self_lists_registered_and_suggestions():
     d = web.api_self(c)
     # phone stored canonical (digits, no +86)
     assert any(r["identifier"] == "13000000000" for r in d["registered"])
-    # account self_id + the 我-hinted conversation peer both appear as suggestions
+    # only the account self_id is suggested — name-hint guessing removed (no 文件传输助手 garbage)
     sug_ids = {s["identifier"] for s in d["suggestions"]}
-    assert "wxid_me" in sug_ids and "wxid_helper" in sug_ids
+    assert "wxid_me" in sug_ids and "wxid_helper" not in sug_ids
 
 
 def test_api_add_and_remove_self():

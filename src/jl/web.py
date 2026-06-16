@@ -180,6 +180,14 @@ def api_reunify(conn, payload):
     return {"ok": True, **stats}
 
 
+def api_mark_person_self(conn, payload):
+    """Declare a wrongly-listed contact as actually the USER (pick, not type)."""
+    n = db.mark_person_self(conn, payload["person_id"])
+    db.log_event(conn, kind="self_person", actor=payload.get("actor", "user"),
+                 detail={"person_id": payload["person_id"]})
+    return {"ok": True, "self_count": n}
+
+
 def api_watch(conn, payload):
     on = bool(payload.get("on", True))
     db.set_watch(conn, payload["person_id"], on)
@@ -330,8 +338,8 @@ def make_handler(db_path):
                               "/api/outbox/confirm", "/api/outbox/cancel",
                               "/api/suggestions/dismiss", "/api/draft-assist",
                               "/api/matters", "/api/matters/status", "/api/diagnose",
-                              "/api/self", "/api/self/remove", "/api/reunify",
-                              "/api/watch", "/api/connect", "/api/unlink"):
+                              "/api/self", "/api/self/remove", "/api/self/person",
+                              "/api/reunify", "/api/watch", "/api/connect", "/api/unlink"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -362,6 +370,8 @@ def make_handler(db_path):
                     return self._send(200, api_add_self(conn, payload))
                 if u.path == "/api/self/remove":
                     return self._send(200, api_remove_self(conn, payload))
+                if u.path == "/api/self/person":
+                    return self._send(200, api_mark_person_self(conn, payload))
                 if u.path == "/api/reunify":
                     return self._send(200, api_reunify(conn, payload))
                 if u.path == "/api/watch":
@@ -416,6 +426,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 .matter button{margin-top:4px;padding:2px 8px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer;font-size:12px}
 #settings{position:absolute;inset:0;background:#fff;overflow:auto;padding:16px 20px;z-index:5}
 #settings.hide{display:none}#main{position:relative}
+#hdr{position:relative;z-index:6;background:#fff}
 #settings h2{font-size:16px;margin:18px 0 8px;border-bottom:1px solid #eee;padding-bottom:4px}
 #settings .row{padding:6px 0;border-bottom:1px solid #f2f2f2;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 #settings .id{color:#555}#settings .tag{color:#888;font-size:12px}
@@ -436,6 +447,8 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 <div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button>
  <button onclick="toggleSettings()">⚙ 设置</button><b id=title>选择会话</b></div>
  <div id=settings class=hide>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+   <b>⚙ 设置</b><button class=go onclick="toggleSettings()">✕ 关闭设置</button></div>
   <h2>🪞 自我身份</h2><div id=self_reg></div>
   <div class=sec style="margin-top:6px">建议（勾选纳入「我的」）</div><div id=self_sug></div>
   <h2>🔄 归一</h2>
@@ -557,9 +570,12 @@ async function loadSettings(){
  document.getElementById('people').innerHTML=(ps||[]).map(p=>
   `<div class=row><b>${esc(p.name||p.id)}</b> <span class=tag>${esc(p.id)}</span>
    <button onclick="watchPerson('${esc(p.id)}')">⭐关注</button>
+   <button class=danger onclick="markSelf('${esc(p.id)}','${esc(p.name||p.id)}')">🪞这其实是我</button>
    <input placeholder="微信chat_id" data-pid="${esc(p.id)}">
    <button class=go onclick="connectChannel('${esc(p.id)}',this)">🔗连渠道</button></div>`
   ).join('')||'<div class=tag style=padding:6px>(暂无已归并联系人)</div>'}
+async function markSelf(pid,name){if(!confirm('把「'+name+'」标为你自己?其身份将纳入自我、从联系人移除。'))return;
+ await P('/self/person',{person_id:pid});toast('已设为自我 🪞');loadSettings()}
 async function addSelf(kind,identifier,btn){const persona=btn.parentNode.querySelector('select').value;
  await P('/self',{kind,identifier,persona});toast('已纳入「我的」');loadSettings()}
 async function removeSelf(kind,identifier){await P('/self/remove',{kind,identifier});loadSettings()}
