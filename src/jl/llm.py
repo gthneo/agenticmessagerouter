@@ -81,7 +81,10 @@ def complete(messages, *, task="reply", provider=None, conn=None, **opts):
     fn = PROVIDERS.get(name) if name else None
     if fn is None:
         return LLMResult(ok=False, error="llm_unavailable")
-    res = fn(messages, **opts)
+    try:
+        res = fn(messages, **opts)
+    except Exception as e:  # a provider must never break the LLM-optional contract
+        return LLMResult(ok=False, error=str(e))
     if conn is not None and (res.tokens_in or res.tokens_out):
         db.record_tokens(conn, channel_kind="llm", op=task,
                          tokens_in=res.tokens_in, tokens_out=res.tokens_out)

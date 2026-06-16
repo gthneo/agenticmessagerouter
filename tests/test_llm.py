@@ -34,3 +34,12 @@ def test_complete_records_tokens_when_conn_given(monkeypatch):
 def test_available_false_when_no_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert llm.available() is False
+
+
+def test_complete_provider_exception_degrades_not_raises(monkeypatch):
+    def boom(messages, **opts):
+        raise RuntimeError("provider blew up")
+    monkeypatch.setitem(llm.PROVIDERS, "boom", boom)
+    monkeypatch.setattr(llm, "route", lambda task: "boom")
+    r = llm.complete([{"role": "user", "content": "x"}], task="reply")
+    assert r.ok is False and "blew up" in r.error   # degraded, did not raise
