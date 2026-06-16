@@ -159,9 +159,11 @@ class FullWechatAdapter(ingest.IngestAdapter):
         return out
 
     def _live_chat_ids(self):
-        """Set of currently-selectable chat ids, or None if the list can't be fetched."""
+        """Set of currently-selectable chat ids, or None if the list can't be fetched.
+        Fetch the FULL list (not just the top page) — a quiet contact can sit past the
+        first 200 yet still be selectable; a short limit wrongly判定 them unsendable."""
         try:
-            chats = self._get("/api/chats?limit=200&offset=0")
+            chats = self._get("/api/chats?limit=1000&offset=0")
             return {c.get("id") for c in chats}
         except Exception:
             return None  # unknown — don't block the send on a failed pre-check
