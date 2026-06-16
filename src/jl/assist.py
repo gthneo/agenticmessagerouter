@@ -149,9 +149,16 @@ def build_opener_context(conn, person_id, recent=12, playbook=None):
     if pb:
         sys = sys + PLAYBOOK_GUIDANCE + pb
     gap = (f"距上次互动约 {days:.0f} 天。" if days is not None else "")
-    history = ("最近对话:\n" + "\n".join(lines)) if lines else "尚无历史往来(冷启动,初次主动联络)。"
+    if lines:
+        history = "最近对话:\n" + "\n".join(lines)
+        ask = "请起草主动联络的开场白。"
+    else:
+        history = "尚无历史往来——这是初次主动联系。"
+        # cold start: the model must NOT fabricate a shared past (would be exposed).
+        ask = ("请起草初次主动联络的开场白:不要假装聊过、不要编造过往交流或具体事项;"
+               "先简短表明身份/来意,给对方一个清晰、真实的由头或好处,留个好接的话头。")
     user = (f"联系人: {pname}" + (f"(类别 {pcat})" if pcat else "") + f" {gap}\n\n"
-            + history + "\n\n请起草主动联络的开场白。")
+            + history + "\n\n" + ask)
     return [{"role": "system", "content": sys}, {"role": "user", "content": user}]
 
 

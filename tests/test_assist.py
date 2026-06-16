@@ -96,7 +96,8 @@ def test_build_opener_context_cold_when_no_history():
     db.upsert_person(conn, id="cold", name="王五", category="biz", threshold_days=7, aliases=[])
     msgs = assist.build_opener_context(conn, "cold", playbook="")
     usermsg = next(m["content"] for m in msgs if m["role"] == "user")
-    assert "冷启动" in usermsg or "尚无" in usermsg          # cold-start framing
+    assert "初次" in usermsg and "尚无" in usermsg            # cold-start framing
+    assert "不要编造" in usermsg or "不要假装" in usermsg      # anti-fabrication guard
 
 
 def test_primary_conversation_picks_sendable_private_most_msgs():
