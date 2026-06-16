@@ -43,7 +43,7 @@ def load_playbook():
         return ""
 
 
-def build_context(conn, conversation_id, recent=12, playbook=None):
+def build_context(conn, conversation_id, recent=12, playbook=None, guidance=""):
     conv = db.get_conversation(conn, conversation_id)
     person = db.get_person(conn, conv["person_id"]) if conv and conv.get("person_id") else None
     rows = conn.execute(
@@ -59,9 +59,20 @@ def build_context(conn, conversation_id, recent=12, playbook=None):
     pb = load_playbook() if playbook is None else playbook
     if pb:
         sys = sys + PLAYBOOK_GUIDANCE + pb
+    if guidance:   # T4 诊断口径 drives the draft (沟通教练 → 起草)
+        sys = sys + "\n\n本次诊断口径(据此起草,务必落实):" + guidance
     user = (f"对话对象: {pname}" + (f"(类别 {pcat})" if pcat else "") + "\n\n"
             "最近对话:\n" + "\n".join(lines) + "\n\n请起草回复。")
     return [{"role": "system", "content": sys}, {"role": "user", "content": user}]
+
+
+def _diagnosis_guidance(conn, conversation_id):
+    """The 口径 from an open matter's T4 diagnosis on this conversation (drives 起草)."""
+    for m in db.get_matters(conn, conversation_id=conversation_id, status="open"):
+        kou = (m.get("diagnosis") or {}).get("口径")
+        if kou:
+            return kou
+    return ""
 
 
 _LINE = re.compile(r"^\s*\d+\s*[)\).、]\s*([^:：]+?)\s*[:：]\s*(.+?)\s*$")
@@ -80,8 +91,10 @@ def parse_versions(text):
 
 
 def generate_drafts(conn, conversation_id, *, n=3, llm_complete=_llm.complete):
-    """Generate + store N reply suggestions. Returns count stored (0 if llm unavailable)."""
-    messages = build_context(conn, conversation_id)
+    """Generate + store N reply suggestions. Returns count stored (0 if llm unavailable).
+    If an open matter on this conversation carries a T4 诊断口径, it drives the drafting."""
+    messages = build_context(conn, conversation_id,
+                             guidance=_diagnosis_guidance(conn, conversation_id))
     res = llm_complete(messages, task="reply", conn=conn)
     if not res.ok or not res.text:
         return 0

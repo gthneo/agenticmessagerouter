@@ -173,6 +173,18 @@ def api_matter_status(conn, payload):
     return {"ok": True}
 
 
+def api_diagnose(conn, payload):
+    """T4 诊断 a matter's conversation → structured diagnosis stored on the matter."""
+    from . import diagnosis, llm
+    if not llm.available():
+        return {"ok": False, "error": "LLM 未配置——可手填诊断 (LLM-optional)"}
+    d = diagnosis.diagnose(conn, int(payload["conversation_id"]),
+                           matter_id=int(payload["matter_id"]))
+    db.log_event(conn, kind="diagnose", actor=payload.get("actor", "user"),
+                 detail={"matter_id": payload.get("matter_id")})
+    return {"ok": bool(d), "diagnosis": d}
+
+
 def api_generate_drafts(conn, payload):
     from . import assist, llm
     if not llm.available():
@@ -248,7 +260,7 @@ def make_handler(db_path):
             if u.path not in ("/api/ingest", "/api/link", "/api/outbox",
                               "/api/outbox/confirm", "/api/outbox/cancel",
                               "/api/suggestions/dismiss", "/api/draft-assist",
-                              "/api/matters", "/api/matters/status"):
+                              "/api/matters", "/api/matters/status", "/api/diagnose"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -273,6 +285,8 @@ def make_handler(db_path):
                     return self._send(200, api_create_matter(conn, payload))
                 if u.path == "/api/matters/status":
                     return self._send(200, api_matter_status(conn, payload))
+                if u.path == "/api/diagnose":
+                    return self._send(200, api_diagnose(conn, payload))
                 return self._send(200, api_cancel_outbox(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
@@ -349,8 +363,12 @@ async function loadMatters(id){const ms=await E('/matters','conversation='+id);
  document.getElementById('matters').innerHTML=ms.map(m=>{
  const d=m.diagnosis||{};const dg=d['一句话诊断']?`<div class=dg>🩺 ${esc(d['一句话诊断'])}</div>`:'';
  const cm=(m.commitments||[]).map(c=>`<div class=cm>📌 ${esc(c.text)} <span class=badge>${esc(c.status)}</span></div>`).join('');
+ const dx=`<button onclick="diagnose(${m.id})">🩺 诊断</button>`;
  const act=m.status==='open'?`<button onclick="matterStatus(${m.id},'handled')">✓ 办结</button>`:`<span class=badge>${esc(m.status)}</span>`;
- return `<div class=matter><div class=h>${esc(m.title)} ${m.kind?`<span class=badge>${esc(m.kind)}</span>`:''}</div>${dg}${cm}${act}</div>`}).join('')||'<div class=p style=padding:8px>(暂无事项，＋记一件事)</div>'}
+ return `<div class=matter><div class=h>${esc(m.title)} ${m.kind?`<span class=badge>${esc(m.kind)}</span>`:''}</div>${dg}${cm}${dx} ${act}</div>`}).join('')||'<div class=p style=padding:8px>(暂无事项，＋记一件事)</div>'}
+async function diagnose(mid){if(!window.CURCONV)return;
+ const r=await P('/diagnose',{matter_id:mid,conversation_id:window.CURCONV});
+ if(!r.ok){alert(r.error||'诊断失败');return}loadMatters(window.CURCONV)}
 async function createMatter(){if(!window.CURCONV){alert('先选会话');return}
  const t=prompt('记一件事（标题）：');if(!t)return;
  await P('/matters',{title:t,conversation_ids:[window.CURCONV]});loadMatters(window.CURCONV)}
