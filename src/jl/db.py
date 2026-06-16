@@ -562,6 +562,97 @@ def clear_suggestions(conn, conversation_id):
     conn.commit()
 
 
+# ----- 事 (matters: M:N persons + conversations) ----------------------------
+
+def create_matter(conn, *, title, kind="", status="open", surface_on="",
+                  person_ids=None, conversation_ids=None, diagnosis=None):
+    now = _now()
+    cur = conn.execute(
+        """INSERT INTO matters (title, kind, status, diagnosis, surface_on, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (title, kind, status, json.dumps(diagnosis or {}, ensure_ascii=False),
+         surface_on, now, now))
+    mid = cur.lastrowid
+    for pid in (person_ids or []):
+        link_matter_person(conn, mid, pid)
+    for cid in (conversation_ids or []):
+        link_matter_conversation(conn, mid, cid)
+    conn.commit()
+    return mid
+
+
+def link_matter_person(conn, matter_id, person_id):
+    conn.execute("INSERT OR IGNORE INTO matter_persons (matter_id, person_id) VALUES (?, ?)",
+                 (matter_id, person_id))
+    conn.commit()
+
+
+def link_matter_conversation(conn, matter_id, conversation_id):
+    conn.execute("INSERT OR IGNORE INTO matter_conversations (matter_id, conversation_id) "
+                 "VALUES (?, ?)", (matter_id, conversation_id))
+    conn.commit()
+
+
+def _matter_row(conn, row):
+    d = dict(row)
+    d["diagnosis"] = json.loads(d.get("diagnosis") or "{}")
+    d["person_ids"] = [r[0] for r in conn.execute(
+        "SELECT person_id FROM matter_persons WHERE matter_id=?", (d["id"],))]
+    d["conversation_ids"] = [r[0] for r in conn.execute(
+        "SELECT conversation_id FROM matter_conversations WHERE matter_id=?", (d["id"],))]
+    d["commitments"] = get_commitments(conn, d["id"])
+    return d
+
+
+def get_matters(conn, *, person_id=None, conversation_id=None, status=None):
+    """Matters, optionally filtered by a linked person / conversation / status.
+    Returns each with person_ids, conversation_ids, commitments resolved."""
+    sql = "SELECT DISTINCT m.* FROM matters m"
+    where, args = [], []
+    if person_id is not None:
+        sql += " JOIN matter_persons mp ON mp.matter_id=m.id"
+        where.append("mp.person_id=?"); args.append(person_id)
+    if conversation_id is not None:
+        sql += " JOIN matter_conversations mc ON mc.matter_id=m.id"
+        where.append("mc.conversation_id=?"); args.append(conversation_id)
+    if status is not None:
+        where.append("m.status=?"); args.append(status)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY m.updated_at DESC"
+    return [_matter_row(conn, r) for r in conn.execute(sql, args).fetchall()]
+
+
+def set_matter_status(conn, matter_id, status):
+    conn.execute("UPDATE matters SET status=?, updated_at=? WHERE id=?",
+                 (status, _now(), matter_id))
+    conn.commit()
+
+
+def set_matter_diagnosis(conn, matter_id, diagnosis):
+    conn.execute("UPDATE matters SET diagnosis=?, updated_at=? WHERE id=?",
+                 (json.dumps(diagnosis or {}, ensure_ascii=False), _now(), matter_id))
+    conn.commit()
+
+
+def add_commitment(conn, matter_id, text, due="", status="open"):
+    cur = conn.execute(
+        "INSERT INTO commitments (matter_id, text, due, status, created_at) VALUES (?, ?, ?, ?, ?)",
+        (matter_id, text, due, status, _now()))
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_commitments(conn, matter_id):
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM commitments WHERE matter_id=? ORDER BY id", (matter_id,))]
+
+
+def set_commitment_status(conn, commitment_id, status):
+    conn.execute("UPDATE commitments SET status=? WHERE id=?", (status, commitment_id))
+    conn.commit()
+
+
 # ----- reset (destructive; HITL-gated at the CLI layer) ---------------------
 
 def reset_store(conn, *, dry_run=True, platform=None, include_accounts=False):

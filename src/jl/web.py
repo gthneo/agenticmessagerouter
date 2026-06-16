@@ -149,6 +149,30 @@ def api_dismiss_suggestion(conn, payload):
     return {"ok": True}
 
 
+def api_matters(conn, params):
+    """事 for the right pane, filtered by the current person / conversation."""
+    cid = params.get("conversation")
+    return db.get_matters(conn, person_id=params.get("person") or None,
+                          conversation_id=int(cid) if cid else None,
+                          status=params.get("status") or None)
+
+
+def api_create_matter(conn, payload):
+    mid = db.create_matter(
+        conn, title=(payload.get("title") or "").strip() or "(未命名)",
+        kind=payload.get("kind", ""),
+        person_ids=payload.get("person_ids") or [],
+        conversation_ids=payload.get("conversation_ids") or [])
+    db.log_event(conn, kind="matter_create", actor=payload.get("actor", "user"),
+                 detail={"matter_id": mid})
+    return {"ok": True, "id": mid}
+
+
+def api_matter_status(conn, payload):
+    db.set_matter_status(conn, int(payload["id"]), payload["status"])
+    return {"ok": True}
+
+
 def api_generate_drafts(conn, payload):
     from . import assist, llm
     if not llm.available():
@@ -202,6 +226,8 @@ def make_handler(db_path):
                     return self._send(200, api_merge_candidates(conn))
                 if u.path == "/api/proactive":
                     return self._send(200, api_proactive(conn))
+                if u.path == "/api/matters":
+                    return self._send(200, api_matters(conn, params))
                 if u.path == "/api/outbox":
                     return self._send(200, api_list_outbox(conn))
                 if u.path.startswith("/api/conversations/") and u.path.endswith("/suggestions"):
@@ -221,7 +247,8 @@ def make_handler(db_path):
                 return self._send(401, {"error": "unauthorized"})
             if u.path not in ("/api/ingest", "/api/link", "/api/outbox",
                               "/api/outbox/confirm", "/api/outbox/cancel",
-                              "/api/suggestions/dismiss", "/api/draft-assist"):
+                              "/api/suggestions/dismiss", "/api/draft-assist",
+                              "/api/matters", "/api/matters/status"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -242,6 +269,10 @@ def make_handler(db_path):
                     return self._send(200, api_dismiss_suggestion(conn, payload))
                 if u.path == "/api/draft-assist":
                     return self._send(200, api_generate_drafts(conn, payload))
+                if u.path == "/api/matters":
+                    return self._send(200, api_create_matter(conn, payload))
+                if u.path == "/api/matters/status":
+                    return self._send(200, api_matter_status(conn, payload))
                 return self._send(200, api_cancel_outbox(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
@@ -281,6 +312,10 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 #replybox{border-top:1px solid #ddd;padding:8px 12px;display:flex;gap:8px;align-items:flex-start}
 #replybox textarea{flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font:inherit;resize:vertical}
 #replybox button{padding:6px 12px;border:1px solid #48a;background:#e8f0fb;color:#147;border-radius:6px;cursor:pointer;white-space:nowrap}
+#right{width:330px;border-left:1px solid #ddd;overflow:auto;display:flex;flex-direction:column}
+.matter{padding:8px 12px;border-bottom:1px solid #eee}.matter .h{font-weight:600}
+.matter .dg{color:#a40;font-size:12px;margin:3px 0}.matter .cm{color:#555;font-size:12px}
+.matter button{margin-top:4px;padding:2px 8px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer;font-size:12px}
 </style></head><body>
 <div id=side>
  <div class=sec>📞 该联系谁</div><div id=proactive></div>
@@ -290,10 +325,13 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  <div class=sec>💬 会话</div>
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
 <div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button><b id=title>选择会话</b></div><div id=msgs></div>
- <div id=suggest></div>
- <div id=replybox><textarea id=reply rows=2 placeholder="点上面「用此版」填入，可改；「暂存待发」后去左边确认真发"></textarea>
+ <div id=replybox><textarea id=reply rows=2 placeholder="点右侧「用此版」填入，可改；「暂存待发」后去左边确认真发"></textarea>
  <button onclick="draft()">暂存待发 →</button>
  <button onclick="aiDraft()">✨ AI 拟话术</button></div></div>
+<div id=right>
+ <div class=sec>🗂 事（这条会话）<button onclick="createMatter()" style="float:right;font-size:12px">＋记一件事</button></div>
+ <div id=matters></div>
+ <div class=sec>✨ 话术</div><div id=suggest></div></div>
 <script>
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
@@ -306,7 +344,17 @@ async function loadConvs(){const c=await E('/conversations');document.getElement
 async function openConv(id){window.CURCONV=id;const m=await E('/conversations/'+id+'/messages');
  document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
  <span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)';
- loadSuggestions(id)}
+ loadSuggestions(id);loadMatters(id)}
+async function loadMatters(id){const ms=await E('/matters','conversation='+id);
+ document.getElementById('matters').innerHTML=ms.map(m=>{
+ const d=m.diagnosis||{};const dg=d['一句话诊断']?`<div class=dg>🩺 ${esc(d['一句话诊断'])}</div>`:'';
+ const cm=(m.commitments||[]).map(c=>`<div class=cm>📌 ${esc(c.text)} <span class=badge>${esc(c.status)}</span></div>`).join('');
+ const act=m.status==='open'?`<button onclick="matterStatus(${m.id},'handled')">✓ 办结</button>`:`<span class=badge>${esc(m.status)}</span>`;
+ return `<div class=matter><div class=h>${esc(m.title)} ${m.kind?`<span class=badge>${esc(m.kind)}</span>`:''}</div>${dg}${cm}${act}</div>`}).join('')||'<div class=p style=padding:8px>(暂无事项，＋记一件事)</div>'}
+async function createMatter(){if(!window.CURCONV){alert('先选会话');return}
+ const t=prompt('记一件事（标题）：');if(!t)return;
+ await P('/matters',{title:t,conversation_ids:[window.CURCONV]});loadMatters(window.CURCONV)}
+async function matterStatus(id,s){await P('/matters/status',{id,status:s});loadMatters(window.CURCONV)}
 window.SUG={};
 async function loadSuggestions(id){const s=await E('/conversations/'+id+'/suggestions');
  window.SUG={};s.forEach(x=>window.SUG[x.id]=x.body);
@@ -348,6 +396,7 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
 function goHome(){document.getElementById('title').textContent='选择会话';
  document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';
+ document.getElementById('matters').innerHTML='';
  loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()}
 async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
  goHome()}

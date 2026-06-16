@@ -45,6 +45,20 @@ def test_api_search_empty_query_returns_empty():
     assert web.api_search(c, "") == []
 
 
+def test_api_matters_create_filter_status():
+    c = db.connect(":memory:"); db.init_db(c)
+    db.upsert_person(c, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(c, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="w1", name="张三")
+    db.link_person(c, cid, "u1")
+    r = web.api_create_matter(c, {"title": "周四饭局", "conversation_ids": [cid], "person_ids": ["u1"]})
+    assert r["ok"] and r["id"]
+    rows = web.api_matters(c, {"conversation": str(cid)})
+    assert len(rows) == 1 and rows[0]["title"] == "周四饭局"
+    web.api_matter_status(c, {"id": r["id"], "status": "handled"})
+    assert web.api_matters(c, {"conversation": str(cid), "status": "open"}) == []
+
+
 def test_api_proactive_lists_watched_and_red_with_openers():
     import time
     c = db.connect(":memory:"); db.init_db(c)

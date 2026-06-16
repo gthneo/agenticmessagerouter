@@ -127,6 +127,42 @@ CREATE TABLE IF NOT EXISTS suggestions (
 );
 CREATE INDEX IF NOT EXISTS idx_suggestions_conv ON suggestions(conversation_id, status);
 
+-- 事(matters): first-class units of "what's being handled", M:N with persons + conversations.
+-- A matter's lifecycle (事卡) = T4诊断 → T5话术 → T6人审发 → T10承诺/T9跟进.
+CREATE TABLE IF NOT EXISTS matters (
+    id          INTEGER PRIMARY KEY,
+    title       TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL DEFAULT '',           -- 跟进/危机/承诺/会议/边界...
+    status      TEXT NOT NULL DEFAULT 'open',        -- open|handled|dropped
+    diagnosis   TEXT NOT NULL DEFAULT '{}',          -- structured T4 (filled in Block 3)
+    surface_on  TEXT NOT NULL DEFAULT '',            -- T9 定时调出 date(s)
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS matter_persons (
+    matter_id INTEGER NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+    person_id TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+    UNIQUE (matter_id, person_id)
+);
+CREATE TABLE IF NOT EXISTS matter_conversations (
+    matter_id       INTEGER NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    UNIQUE (matter_id, conversation_id)
+);
+CREATE INDEX IF NOT EXISTS idx_matter_persons ON matter_persons(person_id);
+CREATE INDEX IF NOT EXISTS idx_matter_convs ON matter_conversations(conversation_id);
+
+-- 承诺台账 (T10): commitments tracked per matter.
+CREATE TABLE IF NOT EXISTS commitments (
+    id         INTEGER PRIMARY KEY,
+    matter_id  INTEGER NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+    text       TEXT NOT NULL DEFAULT '',
+    due        TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'open',          -- open|kept|broken
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_commitments_matter ON commitments(matter_id);
+
 -- full-text search (trigram = CJK substring; NOTE: only matches queries >= 3 chars,
 -- so the search layer uses a LIKE fallback for shorter queries)
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
