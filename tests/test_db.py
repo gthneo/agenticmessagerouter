@@ -98,6 +98,19 @@ def test_ensure_columns_adds_missing_on_old_db():
     c.close()
 
 
+def test_unlink_conversation_splits_bad_merge(conn):
+    db.upsert_person(conn, id="u1", name="李四", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_other", name="同名")
+    db.link_person(conn, cid, "u1")
+    db.upsert_channel(conn, person_id="u1", kind="wechat", identifier="wxid_other")
+    freed = db.unlink_conversation(conn, cid)
+    assert freed == "u1"
+    assert db.get_conversation(conn, cid)["person_id"] is None
+    # the endpoint row is gone too (no longer a reachable endpoint for u1)
+    assert ("wechat", "wxid_other") not in [(c["kind"], c["identifier"]) for c in db.get_channels(conn, "u1")]
+
+
 def test_dedup_channels_folds_phone_format_variants(conn):
     db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
     db.upsert_channel(conn, person_id="u1", kind="phone", identifier="13686472775")

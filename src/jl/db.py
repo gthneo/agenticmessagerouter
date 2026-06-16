@@ -307,6 +307,22 @@ def link_person(conn, conversation_id, person_id):
     conn.commit()
 
 
+def unlink_conversation(conn, conversation_id):
+    """Split a wrongly-merged conversation off a person (HITL fix for bad 归一): clear its
+    person link AND drop the matching endpoint row. Returns the freed person_id or None."""
+    row = conn.execute("SELECT person_id, platform, chat_id FROM conversations WHERE id=?",
+                       (conversation_id,)).fetchone()
+    if not row or not row["person_id"]:
+        return None
+    pid = row["person_id"]
+    conn.execute("UPDATE conversations SET person_id=NULL, updated_at=? WHERE id=?",
+                 (_now(), conversation_id))
+    conn.execute("DELETE FROM channels WHERE person_id=? AND kind=? AND identifier=?",
+                 (pid, row["platform"], _canon_identifier(row["platform"], row["chat_id"])))
+    conn.commit()
+    return pid
+
+
 def get_conversation(conn, conversation_id):
     row = conn.execute("SELECT * FROM conversations WHERE id=?", (conversation_id,)).fetchone()
     return dict(row) if row else None

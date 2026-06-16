@@ -85,6 +85,9 @@ def route(args):
                             "chat_id": rest[1] if len(rest) > 1 else None})
     if a in ("电话归一", "dedup-phone"):
         return ("dedup_phone", {})
+    if a in ("解绑", "unlink"):
+        cid = args[1] if len(args) > 1 and not args[1].startswith("--") else None
+        return ("unlink", {"conversation_id": int(cid) if cid else None})
     return ("detail", {"name": a})
 
 
@@ -295,6 +298,20 @@ def cmd_draft_assist(conn, ctx):
         print(f"✨ 自动拟稿: {len(touched)} 个待回会话已生成话术")
 
 
+def cmd_unlink(conn, ctx):
+    cid = ctx.get("conversation_id")
+    if not cid:
+        print("用法: jl 解绑 <会话id>（把误并的会话从某人拆出去）")
+        return
+    freed = db.unlink_conversation(conn, cid)
+    if freed:
+        db.log_event(conn, kind="unlink", person_id=freed, actor=_actor(),
+                     detail={"conversation_id": cid})
+        print(f"🔓 会话 {cid} 已从 {freed} 拆出（端点也已移除）。")
+    else:
+        print(f"会话 {cid} 本就未归人，无需拆。")
+
+
 def cmd_dedup_phone(conn, ctx):
     n = db.dedup_phone_conversations(conn)
     db.log_event(conn, kind="dedup_phone", actor=_actor(), detail={"folded": n})
@@ -446,6 +463,8 @@ def main(argv=None):
         ctx.update(params); cmd_connect(conn, ctx)
     elif command == "dedup_phone":
         cmd_dedup_phone(conn, ctx)
+    elif command == "unlink":
+        ctx.update(params); cmd_unlink(conn, ctx)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()
