@@ -94,6 +94,22 @@ class LarkAdapter(ingest.IngestAdapter):
                 break
         return items
 
+    def send(self, chat_id, text):
+        """Send a text message to a feishu chat via lark-cli (user identity).
+        Returns (ok, error)."""
+        try:
+            d = self._run(["im", "+messages-send", "--chat-id", chat_id,
+                           "--text", text, "--as", "user"])
+        except Exception as e:  # subprocess/transport failure → surface to human
+            return False, str(e)
+        # success = explicit ok:true OR a returned message_id; ok:None without a
+        # message_id is ambiguous → treat as failure, hand back to the human.
+        if d.get("ok") is True or (d.get("data") or {}).get("message_id"):
+            return True, ""
+        err = d.get("error")
+        msg = err.get("message") if isinstance(err, dict) else (str(err) if err else "")
+        return False, msg or "send failed (ambiguous response)"
+
     def all_conversations(self, account):
         chats = self._paged(["im", "+chat-list", "--as", "user"], "chats")
         return [map_chat(c) for c in chats]
