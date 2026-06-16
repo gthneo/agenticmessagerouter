@@ -11,8 +11,14 @@ def _wechat(chat_id, body):
     return send_text(chat_id, body)
 
 
+def _feishu(chat_id, body):
+    from .channels.lark import LarkAdapter
+    return LarkAdapter().send(chat_id, body)
+
+
 SENDERS = {
     "wechat": _wechat,
+    "feishu": _feishu,
 }
 
 

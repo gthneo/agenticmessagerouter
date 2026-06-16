@@ -94,6 +94,20 @@ class LarkAdapter(ingest.IngestAdapter):
                 break
         return items
 
+    def send(self, chat_id, text):
+        """Send a text message to a feishu chat via lark-cli (user identity).
+        Returns (ok, error)."""
+        try:
+            d = self._run(["im", "+messages-send", "--chat-id", chat_id,
+                           "--text", text, "--as", "user"])
+        except Exception as e:  # subprocess/transport failure → surface to human
+            return False, str(e)
+        if d.get("ok") is False:
+            err = d.get("error")
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            return False, msg or "send failed"
+        return True, ""
+
     def all_conversations(self, account):
         chats = self._paged(["im", "+chat-list", "--as", "user"], "chats")
         return [map_chat(c) for c in chats]
