@@ -327,6 +327,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 #replybox textarea{flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font:inherit;resize:vertical}
 #replybox button{padding:6px 12px;border:1px solid #48a;background:#e8f0fb;color:#147;border-radius:6px;cursor:pointer;white-space:nowrap}
 #right{width:330px;border-left:1px solid #ddd;overflow:auto;display:flex;flex-direction:column}
+@keyframes fl{from{background:#fff3cd}to{background:#fff}}.flash{animation:fl .7s}
 .matter{padding:8px 12px;border-bottom:1px solid #eee}.matter .h{font-weight:600}
 .matter .dg{color:#a40;font-size:12px;margin:3px 0}.matter .cm{color:#555;font-size:12px}
 .matter button{margin-top:4px;padding:2px 8px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer;font-size:12px}
@@ -379,7 +380,8 @@ async function loadSuggestions(id){const s=await E('/conversations/'+id+'/sugges
  document.getElementById('suggest').innerHTML=(s.length?'<div class=p>✨ '+(s[0].kind==='opener'?'主动开场':'话术')+'（用此版填入下方，可改）:</div>':'')+
  s.map(x=>`<div class=ob><div class=p>[${esc(x.stance)}]</div><div class=b>${esc(x.body)}</div>
  <button onclick="useDraft(${x.id})">用此版</button> <button onclick="dismissSug(${x.id})">✕</button></div>`).join('')}
-function useDraft(id){document.getElementById('reply').value=window.SUG[id]||'';}
+function useDraft(id){const r=document.getElementById('reply');r.value=window.SUG[id]||'';
+ r.scrollIntoView({block:'center'});r.focus();r.classList.add('flash');setTimeout(()=>r.classList.remove('flash'),700);}
 async function aiDraft(){if(!window.CURCONV){alert('先选会话');return}
  const r=await P('/draft-assist',{conversation_id:window.CURCONV});
  if(!r.ok){alert(r.error||'LLM 不可用');return}loadSuggestions(window.CURCONV)}
