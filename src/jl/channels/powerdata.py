@@ -96,6 +96,20 @@ def parse_sessions(text: str) -> list[dict]:
     return out
 
 
+# Official/service accounts to skip (not real contacts): gh_ prefix + known service ids.
+_SKIP_IDS = {"newsapp", "weixin", "filehelper", "brandsessionholder", "fmessage",
+             "medianote", "floatbottle", "qqmail", "tmessage", "qmessage"}
+
+
+def is_ingestable(chat_id: str, name: str = "") -> bool:
+    """False for official/service accounts (gh_…, 微信团队/支付/Tencent News 等) — not contacts."""
+    if not chat_id:
+        return False
+    if chat_id.startswith("gh_") or chat_id in _SKIP_IDS:
+        return False
+    return True
+
+
 def parse_contact_wxid(text: str) -> str:
     """First contact id from `get_contacts` prose (`wxid_x  备注: A  昵称: B`). '' if none.
     The id may be a raw wxid_… or a custom WeChat id (kerwinlu…); we take the first token."""
@@ -259,6 +273,8 @@ class PowerDataAdapter(ingest.IngestAdapter):
         for s in parse_sessions(text):
             wxid = (self.resolve_wxid(account, s["name"])
                     if (resolve_wxid and not s["is_group"]) else s["name"])
+            if not s["is_group"] and not is_ingestable(wxid, s["name"]):
+                continue   # skip official/service accounts (not real contacts)
             out.append(ingest.ConvRecord(
                 chat_id=wxid, name=s["name"],
                 type="group" if s["is_group"] else "private",

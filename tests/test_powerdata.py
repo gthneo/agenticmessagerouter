@@ -187,3 +187,11 @@ def test_parse_contact_wxid_first_id():
     txt = "找到 1 个联系人（搜索: 张三）:\n\nwxid_test_0001  备注: 张三  昵称: 小三"
     assert powerdata.parse_contact_wxid(txt) == "wxid_test_0001"
     assert powerdata.parse_contact_wxid("未找到匹配") == ""
+
+
+def test_is_ingestable_skips_official():
+    from jl.channels import powerdata
+    assert powerdata.is_ingestable("wxid_test_aaa", "张三") is True
+    assert powerdata.is_ingestable("gh_3dfda90e39d6", "微信支付") is False
+    assert powerdata.is_ingestable("newsapp", "Tencent News") is False
+    assert powerdata.is_ingestable("weixin", "微信团队") is False

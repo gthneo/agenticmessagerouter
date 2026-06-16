@@ -239,3 +239,20 @@ def test_unify_by_wxid_merges_same_wxid_across_accounts(conn):
     assert pa and pa == pb                                  # both Shirley convs → one person
     assert db.get_conversation(conn, sc)["person_id"] is None   # self chat skipped
     assert db.get_conversation(conn, d)["person_id"] != pa      # different wxid not merged
+
+
+def test_merge_persons_combines_two_wxids(conn):
+    from jl import ingest
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    db.upsert_person(conn, id="p_keep", name="李四", category="biz", threshold_days=7, aliases=[])
+    db.upsert_channel(conn, person_id="p_keep", kind="wechat", identifier="wxid_test_aaa")
+    db.upsert_channel(conn, person_id="p_keep", kind="phone", identifier="13000000001")
+    db.upsert_person(conn, id="wx-dup", name="李四别名", category="", threshold_days=7, aliases=[])
+    db.upsert_channel(conn, person_id="wx-dup", kind="wechat", identifier="wxid_test_bbb")
+    cv = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_test_bbb", name="李四")
+    db.link_person(conn, cv, "wx-dup")
+    assert db.merge_persons(conn, "p_keep", "wx-dup") is True
+    assert db.get_person(conn, "wx-dup") is None                       # dup gone
+    chans = {(c["kind"], c["identifier"]) for c in db.get_channels(conn, "p_keep")}
+    assert ("wechat", "wxid_test_bbb") in chans and ("wechat", "wxid_test_aaa") in chans  # both wxids on one person
+    assert db.get_conversation(conn, cv)["person_id"] == "p_keep"      # conv moved

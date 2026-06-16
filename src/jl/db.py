@@ -313,6 +313,35 @@ def link_person(conn, conversation_id, person_id):
     conn.commit()
 
 
+def merge_persons(conn, keep_id, drop_id):
+    """Merge drop person INTO keep (HITL: human confirmed same person, e.g. one李夏宁 with
+    two wxids). Moves channels + conversations + matter links to keep, deletes drop. ok/False."""
+    if keep_id == drop_id or not get_person(conn, keep_id) or not get_person(conn, drop_id):
+        return False
+    for ch in get_channels(conn, drop_id):
+        upsert_channel(conn, person_id=keep_id, kind=ch["kind"],
+                       identifier=ch["identifier"], label=ch.get("label", ""))
+    conn.execute("UPDATE conversations SET person_id=? WHERE person_id=?", (keep_id, drop_id))
+    conn.execute("UPDATE OR IGNORE matter_persons SET person_id=? WHERE person_id=?",
+                 (keep_id, drop_id))
+    conn.execute("DELETE FROM channels WHERE person_id=?", (drop_id,))
+    conn.execute("DELETE FROM persons WHERE id=?", (drop_id,))
+    conn.commit()
+    return True
+
+
+def purge_orphan_persons(conn):
+    """Delete persons that ended up with NO conversations (e.g. cleaned-up official-account
+    noise). Returns count removed."""
+    n = 0
+    for p in get_persons(conn):
+        if not get_conversations(conn, person_id=p["id"]):
+            conn.execute("DELETE FROM persons WHERE id=?", (p["id"],))
+            n += 1
+    conn.commit()
+    return n
+
+
 def unify_by_wxid(conn):
     """Cross-account/tool 联系人归一: merge PRIVATE wechat conversations that share a
     chat_id (= wxid, a stable cross-account id) into ONE person. Prefers an existing person
