@@ -84,6 +84,33 @@ def test_suggestions_kind_round_trips_and_filters(conn):
     assert openers[0]["kind"] == "opener"
 
 
+def test_account_tool_round_trips(conn):
+    db.upsert_account(conn, account_id=4, platform="wechat", self_id="wxid_test_renxiong",
+                      label="仁兄号", tool="powerdata")
+    accts = {a["account_id"]: a for a in db.get_accounts(conn)}
+    assert accts[4]["tool"] == "powerdata"
+    # default stays "" when tool not given (backward compat)
+    db.upsert_account(conn, account_id=5, platform="wechat", self_id="wxid_test_bandi")
+    assert {a["account_id"]: a for a in db.get_accounts(conn)}[5]["tool"] == ""
+    # upsert updates tool in place
+    db.upsert_account(conn, account_id=4, platform="wechat", self_id="wxid_test_renxiong",
+                      tool="fullwechat")
+    assert {a["account_id"]: a for a in db.get_accounts(conn)}[4]["tool"] == "fullwechat"
+
+
+def test_ensure_columns_adds_tool_on_old_accounts_db():
+    # simulate an OLD db whose accounts table predates the tool column → re-init adds it
+    c = db.connect(":memory:")
+    c.executescript(
+        "CREATE TABLE accounts (account_id INTEGER PRIMARY KEY, platform TEXT NOT NULL, "
+        "label TEXT DEFAULT '', self_id TEXT DEFAULT '', host TEXT DEFAULT '', "
+        "cred_ref TEXT DEFAULT '', created_at INTEGER NOT NULL);")
+    assert "tool" not in {r[1] for r in c.execute("PRAGMA table_info(accounts)")}
+    db.init_db(c)   # schema (no-op for accounts) + _ensure_columns adds the column
+    assert "tool" in {r[1] for r in c.execute("PRAGMA table_info(accounts)")}
+    c.close()
+
+
 def test_ensure_columns_adds_missing_on_old_db():
     # simulate an OLD db created without watch/kind, then re-init → columns added
     c = db.connect(":memory:")

@@ -71,6 +71,8 @@ def map_message(msg):
 
 class LarkAdapter(ingest.IngestAdapter):
     platform = "feishu"
+    tool = "lark-cli"
+    can_send = True
 
     def __init__(self, bin=LARK_BIN):
         self.bin = bin

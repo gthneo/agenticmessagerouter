@@ -36,6 +36,7 @@ _ADDED_COLUMNS = {
     "persons": [("watch", "INTEGER NOT NULL DEFAULT 0")],
     "suggestions": [("kind", "TEXT NOT NULL DEFAULT 'reply'")],
     "channels": [("pinned", "INTEGER NOT NULL DEFAULT 0")],
+    "accounts": [("tool", "TEXT NOT NULL DEFAULT ''")],
 }
 
 
@@ -139,17 +140,18 @@ def get_channels(conn, person_id):
 # ----- accounts -------------------------------------------------------------
 
 def upsert_account(conn, *, account_id, platform, label="", self_id="",
-                   host="", cred_ref=""):
+                   host="", cred_ref="", tool=""):
     conn.execute(
         """
         INSERT INTO accounts (account_id, platform, label, self_id, host, cred_ref,
-                              created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+                              tool, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(account_id) DO UPDATE SET
             platform=excluded.platform, label=excluded.label,
-            self_id=excluded.self_id, host=excluded.host, cred_ref=excluded.cred_ref
+            self_id=excluded.self_id, host=excluded.host, cred_ref=excluded.cred_ref,
+            tool=excluded.tool
         """,
-        (account_id, platform, label, self_id, host, cred_ref, _now()),
+        (account_id, platform, label, self_id, host, cred_ref, tool, _now()),
     )
     conn.commit()
     return account_id

@@ -152,6 +152,8 @@ def conversations_from_calls(rows, name_resolver=resolve_contact):
 
 class PhoneAdapter(ingest.IngestAdapter):
     platform = "phone"
+    tool = "callhistory"
+    can_send = False
 
     def _rows(self, limit):
         conn = sqlite3.connect(f"file:{CALLDB}?mode=ro", uri=True, timeout=3)

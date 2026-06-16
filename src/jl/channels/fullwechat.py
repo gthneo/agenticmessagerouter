@@ -110,6 +110,8 @@ def map_message(msg):
 
 class FullWechatAdapter(ingest.IngestAdapter):
     platform = "wechat"
+    tool = "fullwechat"
+    can_send = True
 
     def __init__(self, url=DEFAULT_URL, token=None):
         self.url = url.rstrip("/")

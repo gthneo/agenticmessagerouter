@@ -21,9 +21,29 @@ SENDERS = {
     "feishu": _feishu,
 }
 
+# Per-tool send capability. A read-only access tool (powerdata/callhistory) can read a
+# channel but cannot emit — sending through it degrades to "人手发" (守 HITL), never外发.
+TOOL_CAPS = {
+    "fullwechat": True,
+    "lark-cli": True,
+    "callhistory": False,
+    "powerdata": False,
+}
 
-def send_message(platform, chat_id, body):
-    """Dispatch a send to the platform's sender. Returns (ok, error)."""
+
+def can_send(tool):
+    """True if the access tool can send. Unknown tools default to False (conservative)."""
+    return TOOL_CAPS.get(tool, False)
+
+
+def send_message(platform, chat_id, body, *, tool=None):
+    """Dispatch a send. Returns (ok, error).
+
+    If `tool` is given and that access tool is read-only (can_send False), refuse to send
+    and hand back to the human — read-only tools never外发. When `tool` is None the legacy
+    platform-keyed SENDERS path runs unchanged (full backward compat)."""
+    if tool is not None and not can_send(tool):
+        return False, "该工具只读(只读工具不可发),请人手发或换可发工具"
     fn = SENDERS.get(platform)
     if fn is None:
         return False, f"unsupported platform: {platform}"

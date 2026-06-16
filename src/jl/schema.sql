@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     self_id    TEXT NOT NULL DEFAULT '',
     host       TEXT NOT NULL DEFAULT '',
     cred_ref   TEXT NOT NULL DEFAULT '',
+    tool       TEXT NOT NULL DEFAULT '',      -- which access tool serves this account (fullwechat/powerdata/lark-cli/callhistory)
     created_at INTEGER NOT NULL,
     UNIQUE (platform, self_id)
 );
