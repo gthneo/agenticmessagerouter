@@ -526,6 +526,27 @@ def mark_outbox(conn, outbox_id, status, error=""):
     conn.commit()
 
 
+def get_voice_samples(conn, conversation_id=None, limit=6):
+    """口吻沉淀：messages the user actually SENT (outbox status='sent') = their real voice
+    corpus. Prefer this conversation's sends (voice WITH this person), pad with global
+    recent sends. Distinct, newest first. Grows as the user sends (越用越懂你)."""
+    out, seen = [], set()
+    queries = []
+    if conversation_id is not None:
+        queries.append(("SELECT body FROM outbox WHERE status='sent' AND conversation_id=? "
+                        "ORDER BY id DESC LIMIT ?", (conversation_id, limit)))
+    queries.append(("SELECT body FROM outbox WHERE status='sent' ORDER BY id DESC LIMIT ?",
+                    (limit,)))
+    for sql, args in queries:
+        for r in conn.execute(sql, args):
+            b = (r[0] or "").strip()
+            if b and b not in seen:
+                seen.add(b); out.append(b)
+            if len(out) >= limit:
+                return out
+    return out
+
+
 # ----- suggestions (AI reply-draft candidates) ------------------------------
 
 def add_suggestions(conn, conversation_id, items, *, kind="reply"):

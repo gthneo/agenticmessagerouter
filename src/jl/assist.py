@@ -28,6 +28,17 @@ PLAYBOOK_GUIDANCE = (
 )
 
 
+# 口吻沉淀: few-shot the user's own recently-sent messages so drafts sound like THEM.
+VOICE_GUIDE = (
+    "\n\n下面是我(用户本人)最近亲手发出的几条消息,请**模仿我的口吻语气**"
+    "(用词/句长/标点/称呼/语气词习惯),写得像我本人说的,别端着、别套路腔:\n")
+
+
+def _voice_block(conn, conversation_id):
+    samples = db.get_voice_samples(conn, conversation_id=conversation_id)
+    return (VOICE_GUIDE + "\n".join("· " + s for s in samples)) if samples else ""
+
+
 def _playbook_path():
     return os.environ.get("AMR_PLAYBOOK") or os.path.expanduser("~/.config/jl/playbook.md")
 
@@ -61,6 +72,7 @@ def build_context(conn, conversation_id, recent=12, playbook=None, guidance=""):
         sys = sys + PLAYBOOK_GUIDANCE + pb
     if guidance:   # T4 诊断口径 drives the draft (沟通教练 → 起草)
         sys = sys + "\n\n本次诊断口径(据此起草,务必落实):" + guidance
+    sys = sys + _voice_block(conn, conversation_id)   # 口吻沉淀: write like me
     user = (f"对话对象: {pname}" + (f"(类别 {pcat})" if pcat else "") + "\n\n"
             "最近对话:\n" + "\n".join(lines) + "\n\n请起草回复。")
     return [{"role": "system", "content": sys}, {"role": "user", "content": user}]
@@ -184,6 +196,8 @@ def build_opener_context(conn, person_id, recent=12, playbook=None):
     pb = load_playbook() if playbook is None else playbook
     if pb:
         sys = sys + PLAYBOOK_GUIDANCE + pb
+    if conv:
+        sys = sys + _voice_block(conn, conv["id"])   # 口吻沉淀: opener in my voice too
     gap = (f"距上次互动约 {days:.0f} 天。" if days is not None else "")
     if lines:
         history = "最近对话:\n" + "\n".join(lines)

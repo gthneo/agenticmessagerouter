@@ -50,6 +50,34 @@ def test_build_context_no_playbook_keeps_base_guide():
     assert "打法库" not in sysmsg          # no playbook → no method block, 1a unchanged
 
 
+def test_voice_block_injects_my_sent_messages():
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    oid = db.queue_outbox(conn, conversation_id=cid, body="哈哈行嘞，我这就安排上", actor="me")
+    db.mark_outbox(conn, oid, "sent")
+    msgs = assist.build_context(conn, cid, playbook="")
+    sysmsg = next(m["content"] for m in msgs if m["role"] == "system")
+    assert "模仿我的口吻" in sysmsg and "哈哈行嘞" in sysmsg   # 口吻沉淀 fed into the draft
+
+
+def test_voice_block_empty_when_no_sent_history():
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    msgs = assist.build_context(conn, cid, playbook="")
+    sysmsg = next(m["content"] for m in msgs if m["role"] == "system")
+    assert "模仿我的口吻" not in sysmsg   # no sends yet → no voice block (degrade)
+
+
+def test_get_voice_samples_prefers_this_conversation():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    a = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wa", name="张三")
+    b = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wb", name="李四")
+    oa = db.queue_outbox(conn, conversation_id=a, body="对A说的话", actor="me"); db.mark_outbox(conn, oa, "sent")
+    ob = db.queue_outbox(conn, conversation_id=b, body="对B说的话", actor="me"); db.mark_outbox(conn, ob, "sent")
+    s = db.get_voice_samples(conn, conversation_id=a)
+    assert s[0] == "对A说的话"   # this conversation's voice first
+
+
 def test_parse_versions_splits_numbered_blocks():
     raw = "1) 稳妥: 您好,稍后回复\n2) 直接: 现在不方便\n3) 有温度: 在的,马上看"
     vs = assist.parse_versions(raw)
