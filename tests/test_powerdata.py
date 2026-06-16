@@ -166,3 +166,17 @@ def test_pull_new_pairs_conv_with_messages(monkeypatch):
     conv, msgs = out[0]
     assert conv.chat_id == "工聯會福州家長群"
     assert len(msgs) == 3 and msgs[0].content == "[链接] 标题"
+
+
+def test_parse_sessions_handles_missing_unread_and_group():
+    from jl.channels import powerdata
+    txt = ("最近 3 个会话:\n\n"
+           "[06-16 20:04] 福州家長群 [群] (575条未读)\n  文本: 在吗\n"
+           "[05-31 15:17] 代码班迪\n  文本: 搞定 ✅\n"
+           "[05-22 11:07] shirley2775~养虾人🦐\n  文本: 聚焦和简化")
+    s = powerdata.parse_sessions(txt)
+    by = {x["name"]: x for x in s}
+    assert len(s) == 3
+    assert by["福州家長群"]["is_group"] and by["福州家長群"]["unread"] == 575
+    assert by["代码班迪"]["is_group"] is False and by["代码班迪"]["unread"] == 0   # no 未读 suffix
+    assert "shirley2775~养虾人🦐" in by                                         # bare entry parsed

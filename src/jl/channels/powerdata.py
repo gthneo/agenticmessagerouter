@@ -35,13 +35,14 @@ def _default_url():
 DEFAULT_URL = _default_url()
 SOURCE = "powerdata"
 
-# A session entry header: `[06-16 20:04] 工聯會福州家長群 [群] (575条未读)`.
-# name is everything between the timestamp and the optional ` [群]` / `(…条未读)`.
+# A session entry header. BOTH the group marker and the unread count are OPTIONAL —
+# a 0-unread non-group chat shows as bare `[05-31 15:17] 代码班迪`.
+#   `[06-16 20:04] 群名 [群] (575条未读)`  ·  `[05-22 11:07] shirley2775~养虾人🦐`
 _SESSION_RE = re.compile(
-    r"^\[\d{2}-\d{2}\s+\d{2}:\d{2}\]\s+"      # [MM-DD HH:MM]
-    r"(?P<name>.+?)"                            # name (non-greedy)
-    r"(?P<group>\s+\[群\])?"                    # optional group marker
-    r"\s*\((?P<unread>\d+)\s*条未读\)\s*$"      # (<n>条未读)
+    r"^\[\d{2}-\d{2}\s+\d{2}:\d{2}\]\s+"          # [MM-DD HH:MM]
+    r"(?P<name>.+?)"                                # name (non-greedy)
+    r"(?P<group>\s+\[群\])?"                        # optional group marker
+    r"(?:\s*\((?P<unread>\d+)\s*条未读\))?\s*$"      # optional (<n>条未读)
 )
 # A history message line: `[2026-06-16 07:59] 中国企业家杂志: [链接] 标题`.
 _HISTORY_RE = re.compile(
@@ -88,7 +89,7 @@ def parse_sessions(text: str) -> list[dict]:
         out.append({
             "name": m.group("name").strip(),
             "is_group": bool(m.group("group")),
-            "unread": int(m.group("unread")),
+            "unread": int(m.group("unread") or 0),
             "preview": preview,
         })
         i += 1
