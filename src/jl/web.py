@@ -341,22 +341,38 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
 <div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button><b id=title>选择会话</b></div><div id=msgs></div>
  <div id=replybox><textarea id=reply rows=2 placeholder="点右侧「用此版」填入，可改；「暂存待发」后去左边确认真发"></textarea>
- <button onclick="draft()">暂存待发 →</button>
+ <span id=sendbar><button onclick="sendReply()">发送 →</button></span>
  <button onclick="aiDraft()">✨ AI 拟话术</button></div></div>
 <div id=right>
  <div class=sec>🗂 事（这条会话）<button onclick="createMatter()" style="float:right;font-size:12px">＋记一件事</button></div>
  <div id=matters></div>
- <div class=sec>✨ 话术</div><div id=suggest></div></div>
+ <div class=sec>✨ 话术 <span style="font-weight:400;color:#a40;font-size:12px">· 先🩺诊断更准</span></div><div id=suggest></div></div>
 <script>
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
 const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetch('/api'+s+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())};
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function fmt(ts){return ts?new Date(ts*1000).toLocaleString('zh-CN'):''}
-async function loadConvs(){const c=await E('/conversations');document.getElementById('list').innerHTML=
+window.NAMES={};
+async function loadConvs(){const c=await E('/conversations');c.forEach(x=>window.NAMES[x.id]=x.name||x.chat_id);
+ document.getElementById('list').innerHTML=
  c.map(x=>`<div class=conv onclick="openConv(${x.id})"><div class=n>${esc(x.name||x.chat_id)}</div>
  <div class=p>${esc(x.platform)} · ${fmt(x.last_activity_at)}</div></div>`).join('')}
-async function openConv(id){window.CURCONV=id;const m=await E('/conversations/'+id+'/messages');
+function toast(msg){const t=document.createElement('div');t.textContent=msg;
+ t.style.cssText='position:fixed;bottom:20px;right:20px;background:#176;color:#fff;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:9';
+ document.body.appendChild(t);setTimeout(()=>t.remove(),2500)}
+function resetSendbar(){document.getElementById('sendbar').innerHTML='<button onclick="sendReply()">发送 →</button>'}
+function sendReply(){if(!window.CURCONV){alert('先选会话');return}
+ const body=document.getElementById('reply').value.trim();if(!body)return;
+ const who=window.NAMES[window.CURCONV]||'对方';
+ document.getElementById('sendbar').innerHTML=
+ `<button class=send onclick="confirmSend()">✅ 确认发给 ${esc(who)}</button> <button onclick="resetSendbar()">✕ 改改</button>`}
+async function confirmSend(){const ta=document.getElementById('reply'),body=ta.value.trim();if(!body){resetSendbar();return}
+ const row=await P('/outbox',{conversation_id:window.CURCONV,body});
+ const r=await P('/outbox/confirm',{id:row.id});resetSendbar();
+ if(r.ok){ta.value='';toast('已发送 ✅')}else{alert('发送失败：'+(r.error||'未知'))}
+ loadOutbox()}
+async function openConv(id){window.CURCONV=id;resetSendbar();const m=await E('/conversations/'+id+'/messages');
  document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
  <span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)';
  loadSuggestions(id);loadMatters(id)}
@@ -386,9 +402,6 @@ async function aiDraft(){if(!window.CURCONV){alert('先选会话');return}
  const r=await P('/draft-assist',{conversation_id:window.CURCONV});
  if(!r.ok){alert(r.error||'LLM 不可用');return}loadSuggestions(window.CURCONV)}
 async function dismissSug(id){await P('/suggestions/dismiss',{id});loadSuggestions(window.CURCONV)}
-async function draft(){if(!window.CURCONV){alert('先选会话');return}
- const ta=document.getElementById('reply'),body=ta.value.trim();if(!body)return;
- await P('/outbox',{conversation_id:window.CURCONV,body});ta.value='';loadOutbox()}
 async function loadOutbox(){const o=await E('/outbox');document.getElementById('outbox').innerHTML=
  o.map(x=>`<div class=ob><div class=p>→ ${esc(x.chat_id)} <span class=badge>${esc(x.platform)}</span></div>
  <div class=b>${esc(x.body)}</div>
@@ -414,7 +427,7 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
  ${c.candidates.map(p=>`<div class=p>→ ${esc(p.name||p.id)}</div>
  <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`).join('')}
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
-function goHome(){document.getElementById('title').textContent='选择会话';
+function goHome(){document.getElementById('title').textContent='选择会话';window.CURCONV=null;resetSendbar();
  document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';
  document.getElementById('matters').innerHTML='';
  loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()}
