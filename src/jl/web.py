@@ -149,6 +149,73 @@ def api_dismiss_suggestion(conn, payload):
     return {"ok": True}
 
 
+def api_self(conn):
+    """SELF(自我) settings: registered own-identities + auto suggestions for HITL checkbox."""
+    return {"registered": db.get_self_identities(conn),
+            "suggestions": db.suggest_self_identities(conn)}
+
+
+def api_add_self(conn, payload):
+    db.add_self_identity(conn, payload["kind"], payload["identifier"],
+                         persona=payload.get("persona", "自我"),
+                         label=payload.get("label", ""))
+    db.log_event(conn, kind="self_add", actor=payload.get("actor", "user"),
+                 detail={"kind": payload["kind"], "identifier": payload["identifier"],
+                         "persona": payload.get("persona", "自我")})
+    return {"ok": True}
+
+
+def api_remove_self(conn, payload):
+    db.remove_self_identity(conn, payload["kind"], payload["identifier"])
+    db.log_event(conn, kind="self_remove", actor=payload.get("actor", "user"),
+                 detail={"kind": payload["kind"], "identifier": payload["identifier"]})
+    return {"ok": True}
+
+
+def api_reunify(conn, payload):
+    """启动/复位归一 (HITL; reset only clears AUTO links). Returns {linked, candidates}."""
+    stats = db.reunify(conn, reset=bool(payload.get("reset")))
+    db.log_event(conn, kind="reunify", actor=payload.get("actor", "user"),
+                 detail={"reset": bool(payload.get("reset")), **stats})
+    return {"ok": True, **stats}
+
+
+def api_watch(conn, payload):
+    on = bool(payload.get("on", True))
+    db.set_watch(conn, payload["person_id"], on)
+    db.log_event(conn, kind="watch", person_id=payload["person_id"],
+                 actor=payload.get("actor", "user"), detail={"on": on})
+    return {"ok": True}
+
+
+def api_unlink(conn, payload):
+    freed = db.unlink_conversation(conn, int(payload["conversation_id"]))
+    db.log_event(conn, kind="unlink", person_id=freed, actor=payload.get("actor", "user"),
+                 detail={"conversation_id": int(payload["conversation_id"]), "freed": freed})
+    return {"ok": bool(freed), "freed": freed}
+
+
+def api_connect(conn, payload):
+    """Link a person to a live fullwechat chat id (mirrors cli.cmd_connect): ensure the
+    wechat account, pull recent messages, ingest, link. Network-bound → try/except."""
+    from . import ingest
+    from .channels.fullwechat import FullWechatAdapter, DEFAULT_URL
+    person_id, chat_id = payload["person_id"], payload["chat_id"]
+    if 1 not in {a["account_id"] for a in db.get_accounts(conn)}:
+        db.upsert_account(conn, account_id=1, platform="wechat",
+                          label="fullwechat #1", host=DEFAULT_URL)
+    try:
+        msgs = FullWechatAdapter()._messages(chat_id, 30, 0)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    conv = ingest.ConvRecord(chat_id=chat_id, name="", type="private")
+    cid, n = db.ingest_records(conn, account_id=1, platform="wechat", conv=conv, msgs=msgs)
+    db.link_person(conn, cid, person_id)
+    db.log_event(conn, kind="connect", person_id=person_id, actor=payload.get("actor", "user"),
+                 detail={"chat_id": chat_id, "conversation_id": cid, "msgs": n})
+    return {"ok": True, "conversation_id": cid, "msgs": n}
+
+
 def api_matters(conn, params):
     """事 for the right pane, filtered by the current person / conversation."""
     cid = params.get("conversation")
@@ -238,6 +305,8 @@ def make_handler(db_path):
                     return self._send(200, api_merge_candidates(conn))
                 if u.path == "/api/proactive":
                     return self._send(200, api_proactive(conn))
+                if u.path == "/api/self":
+                    return self._send(200, api_self(conn))
                 if u.path == "/api/matters":
                     return self._send(200, api_matters(conn, params))
                 if u.path == "/api/outbox":
@@ -260,7 +329,9 @@ def make_handler(db_path):
             if u.path not in ("/api/ingest", "/api/link", "/api/outbox",
                               "/api/outbox/confirm", "/api/outbox/cancel",
                               "/api/suggestions/dismiss", "/api/draft-assist",
-                              "/api/matters", "/api/matters/status", "/api/diagnose"):
+                              "/api/matters", "/api/matters/status", "/api/diagnose",
+                              "/api/self", "/api/self/remove", "/api/reunify",
+                              "/api/watch", "/api/connect", "/api/unlink"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -287,6 +358,18 @@ def make_handler(db_path):
                     return self._send(200, api_matter_status(conn, payload))
                 if u.path == "/api/diagnose":
                     return self._send(200, api_diagnose(conn, payload))
+                if u.path == "/api/self":
+                    return self._send(200, api_add_self(conn, payload))
+                if u.path == "/api/self/remove":
+                    return self._send(200, api_remove_self(conn, payload))
+                if u.path == "/api/reunify":
+                    return self._send(200, api_reunify(conn, payload))
+                if u.path == "/api/watch":
+                    return self._send(200, api_watch(conn, payload))
+                if u.path == "/api/connect":
+                    return self._send(200, api_connect(conn, payload))
+                if u.path == "/api/unlink":
+                    return self._send(200, api_unlink(conn, payload))
                 return self._send(200, api_cancel_outbox(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
@@ -331,6 +414,17 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 .matter{padding:8px 12px;border-bottom:1px solid #eee}.matter .h{font-weight:600}
 .matter .dg{color:#a40;font-size:12px;margin:3px 0}.matter .cm{color:#555;font-size:12px}
 .matter button{margin-top:4px;padding:2px 8px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer;font-size:12px}
+#settings{position:absolute;inset:0;background:#fff;overflow:auto;padding:16px 20px;z-index:5}
+#settings.hide{display:none}#main{position:relative}
+#settings h2{font-size:16px;margin:18px 0 8px;border-bottom:1px solid #eee;padding-bottom:4px}
+#settings .row{padding:6px 0;border-bottom:1px solid #f2f2f2;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#settings .id{color:#555}#settings .tag{color:#888;font-size:12px}
+#settings button{padding:3px 10px;border:1px solid #ccc;background:#f7f7f7;border-radius:6px;cursor:pointer}
+#settings button.go{border-color:#4a8;background:#e8f7ee;color:#176}#settings button.go:hover{background:#d4f0e0}
+#settings button.danger{border-color:#c66;background:#fbecec;color:#a33}
+#settings select,#settings input{padding:3px 6px;border:1px solid #ccc;border-radius:6px;width:auto}
+#settings .x{border-color:#c99;color:#a33;padding:1px 7px}
+#reuniout{color:#176;font-size:13px;margin-left:8px}
 </style></head><body>
 <div id=side>
  <div class=sec>📞 该联系谁</div><div id=proactive></div>
@@ -339,7 +433,17 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  <div class=sec>🔗 待确认归并</div><div id=cands></div>
  <div class=sec>💬 会话</div>
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
-<div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button><b id=title>选择会话</b></div><div id=msgs></div>
+<div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button>
+ <button onclick="toggleSettings()">⚙ 设置</button><b id=title>选择会话</b></div>
+ <div id=settings class=hide>
+  <h2>🪞 自我身份</h2><div id=self_reg></div>
+  <div class=sec style="margin-top:6px">建议（勾选纳入「我的」）</div><div id=self_sug></div>
+  <h2>🔄 归一</h2>
+  <div class=row><button class=go onclick="runReunify(false)">🔄 启动归一</button>
+   <button class=danger onclick="runReunify(true)">♻️ 复位归一</button><span id=reuniout></span></div>
+  <h2>👥 人管理</h2><div id=people></div>
+ </div>
+ <div id=msgs></div>
  <div id=replybox><textarea id=reply rows=2 placeholder="点右侧「用此版」填入，可改；「暂存待发」后去左边确认真发"></textarea>
  <span id=sendbar><button onclick="sendReply()">发送 →</button></span>
  <button onclick="aiDraft()">✨ AI 拟话术</button></div></div>
@@ -432,7 +536,45 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
   <br><span style=color:#888>已有：${chs}</span></div>
   <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`}).join('')}
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
+const PERSONAS=['自我','AI分身','经营'];
+function toggleSettings(){const s=document.getElementById('settings');
+ if(s.classList.contains('hide')){s.classList.remove('hide');loadSettings()}else{s.classList.add('hide')}}
+async function loadSettings(){
+ const d=await E('/self');
+ document.getElementById('self_reg').innerHTML=(d.registered||[]).map(s=>
+  `<div class=row><b>${esc(s.kind)}</b> <span class=id>${esc(s.identifier)}</span>
+   <span class=tag>· ${esc(s.persona)}${s.label?' · '+esc(s.label):''}</span>
+   <button class=x onclick="removeSelf('${esc(s.kind)}','${esc(s.identifier)}')">✕</button></div>`
+  ).join('')||'<div class=tag style=padding:6px>(还没登记自我身份)</div>';
+ document.getElementById('self_sug').innerHTML=(d.suggestions||[]).map(s=>{
+  const opts=PERSONAS.map(p=>`<option>${p}</option>`).join('');
+  return `<div class=row><b>${esc(s.kind)}</b> <span class=id>${esc(s.identifier)}</span>
+   <span class=tag>${esc(s.name||'')}${s.reason?' · '+esc(s.reason):''}</span>
+   <select>${opts}</select>
+   <button class=go onclick="addSelf('${esc(s.kind)}','${esc(s.identifier)}',this)">＋设为自我</button></div>`
+  }).join('')||'<div class=tag style=padding:6px>(暂无建议)</div>';
+ const ps=await E('/persons');
+ document.getElementById('people').innerHTML=(ps||[]).map(p=>
+  `<div class=row><b>${esc(p.name||p.id)}</b> <span class=tag>${esc(p.id)}</span>
+   <button onclick="watchPerson('${esc(p.id)}')">⭐关注</button>
+   <input placeholder="微信chat_id" data-pid="${esc(p.id)}">
+   <button class=go onclick="connectChannel('${esc(p.id)}',this)">🔗连渠道</button></div>`
+  ).join('')||'<div class=tag style=padding:6px>(暂无已归并联系人)</div>'}
+async function addSelf(kind,identifier,btn){const persona=btn.parentNode.querySelector('select').value;
+ await P('/self',{kind,identifier,persona});toast('已纳入「我的」');loadSettings()}
+async function removeSelf(kind,identifier){await P('/self/remove',{kind,identifier});loadSettings()}
+async function runReunify(reset){
+ if(reset&&!confirm('复位会清掉自动归并(保留人工确认的),确定?'))return;
+ const r=await P('/reunify',{reset});
+ document.getElementById('reuniout').textContent=`✅ 连接 ${r.linked} · 候选 ${r.candidates}`;
+ loadProactive();loadPersons();loadCands()}
+async function watchPerson(pid){await P('/watch',{person_id:pid,on:true});toast('已关注 ⭐');loadProactive()}
+async function connectChannel(pid,btn){const inp=btn.parentNode.querySelector('input'),chat_id=inp.value.trim();
+ if(!chat_id){alert('先填微信 chat_id');return}
+ const r=await P('/connect',{person_id:pid,chat_id});
+ if(r.ok){toast('已连渠道 🔗 ('+r.msgs+'条)');inp.value='';loadPersons()}else{alert('连失败：'+(r.error||'未知'))}}
 function goHome(){document.getElementById('title').textContent='选择会话';window.CURCONV=null;resetSendbar();
+ document.getElementById('settings').classList.add('hide');
  document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';
  document.getElementById('matters').innerHTML='';
  loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()}

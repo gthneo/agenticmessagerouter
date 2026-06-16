@@ -285,3 +285,56 @@ def test_api_generate_drafts_llm_optional(monkeypatch):
     monkeypatch.setattr(llm, "available", lambda: False)
     res = web.api_generate_drafts(c, {"conversation_id": cid})
     assert res["ok"] is False and "llm" in res["error"].lower()
+
+
+# ----- v0.8 settings: SELF / reunify / watch -------------------------------
+
+def test_api_self_lists_registered_and_suggestions():
+    c = db.connect(":memory:"); db.init_db(c)
+    db.upsert_account(c, account_id=1, platform="wechat", self_id="wxid_me")
+    db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="wxid_helper",
+                           name="文件传输助手", type="private")
+    db.add_self_identity(c, "phone", "+8613000000000", persona="自我")
+    d = web.api_self(c)
+    # phone stored canonical (digits, no +86)
+    assert any(r["identifier"] == "13000000000" for r in d["registered"])
+    # account self_id + the 我-hinted conversation peer both appear as suggestions
+    sug_ids = {s["identifier"] for s in d["suggestions"]}
+    assert "wxid_me" in sug_ids and "wxid_helper" in sug_ids
+
+
+def test_api_add_and_remove_self():
+    c = db.connect(":memory:"); db.init_db(c)
+    res = web.api_add_self(c, {"kind": "wechat", "identifier": "wxid_me",
+                               "persona": "AI分身", "label": "分身号"})
+    assert res["ok"] is True
+    reg = web.api_self(c)["registered"]
+    row = next(r for r in reg if r["identifier"] == "wxid_me")
+    assert row["persona"] == "AI分身"
+    assert "self_add" in [e["kind"] for e in db.get_events(c)]
+    web.api_remove_self(c, {"kind": "wechat", "identifier": "wxid_me"})
+    assert web.api_self(c)["registered"] == []
+
+
+def test_api_reunify_returns_stats():
+    c = db.connect(":memory:"); db.init_db(c); _seed_person(c)
+    res = web.api_reunify(c, {})
+    assert res["ok"] is True and "linked" in res and "candidates" in res
+    assert "reunify" in [e["kind"] for e in db.get_events(c)]
+
+
+def test_api_watch():
+    c = db.connect(":memory:"); db.init_db(c)
+    db.upsert_person(c, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    res = web.api_watch(c, {"person_id": "u1", "on": True})
+    assert res["ok"] is True
+    assert next(p for p in db.get_persons(c) if p["id"] == "u1")["watch"]
+    assert "watch" in [e["kind"] for e in db.get_events(c)]
+
+
+def test_api_unlink_no_link_returns_gracefully():
+    c = db.connect(":memory:"); db.init_db(c)
+    db.upsert_account(c, account_id=1, platform="wechat", self_id="s")
+    cid = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="w", name="张三")
+    res = web.api_unlink(c, {"conversation_id": cid})
+    assert res["ok"] is False and res["freed"] is None
