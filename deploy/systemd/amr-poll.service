@@ -8,6 +8,7 @@ WorkingDirectory=%h/amr
 Environment=PYTHONPATH=%h/amr/src
 Environment=AGENT_WECHAT_URL=http://localhost:6174
 Environment=JL_ACTOR=poll
+EnvironmentFile=%h/.config/jl/amr.env
 ExecStart=__PYTHON__ -m jl.cli poll --interval 300
 Restart=always
 RestartSec=10

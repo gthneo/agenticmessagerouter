@@ -17,7 +17,15 @@ if [ ! -f "$TOKEN_FILE" ]; then
     python3 -c 'import secrets; print(secrets.token_hex(16))' > "$TOKEN_FILE"
     chmod 600 "$TOKEN_FILE"
 fi
-printf 'JL_WEB_TOKEN=%s\n' "$(cat "$TOKEN_FILE")" > "$ENV_FILE"
+{
+    printf 'JL_WEB_TOKEN=%s\n' "$(cat "$TOKEN_FILE")"
+    # LLM 话术 assist via the Claude Code Max plan (no ANTHROPIC_API_KEY): pin the
+    # provider and give an absolute binary path so systemd --user (no login PATH)
+    # finds it. Override AMR_CLAUDE_BIN if claude lives elsewhere.
+    printf 'AMR_LLM_PROVIDER=claude_code\n'
+    CLAUDE_BIN="$(command -v claude || echo "$HOME/.npm-global/bin/claude")"
+    printf 'AMR_CLAUDE_BIN=%s\n' "$CLAUDE_BIN"
+} > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
 # render units (substitute the real python path) into the user unit dir
