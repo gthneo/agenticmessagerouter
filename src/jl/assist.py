@@ -118,15 +118,18 @@ def _person_days(conn, person_id):
 
 def primary_conversation(conn, person_id):
     """Pick the best send target for a proactive opener: a private conversation on a
-    sendable platform, most messages wins. Returns the conversation dict or None."""
-    best, best_n = None, -1
+    sendable platform. Prefers the most-recently-active one (so a freshly-linked/used
+    chat wins over a stale duplicate), tie-broken by richer history. Returns dict or None."""
+    best, best_key = None, None
     for c in db.get_conversations(conn, person_id=person_id):
         if c.get("type") != "private" or c.get("platform") not in SENDABLE_PLATFORMS:
             continue
-        n = conn.execute("SELECT COUNT(*) FROM messages WHERE conversation_id=?",
-                         (c["id"],)).fetchone()[0]
-        if n > best_n:
-            best, best_n = c, n
+        n, last_ts = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(ts), 0) FROM messages WHERE conversation_id=?",
+            (c["id"],)).fetchone()
+        key = (last_ts, n)   # newest activity first, then more messages
+        if best_key is None or key > best_key:
+            best, best_key = c, key
     return best
 
 

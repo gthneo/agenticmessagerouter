@@ -116,6 +116,20 @@ def test_primary_conversation_picks_sendable_private_most_msgs():
     assert pc is not None and pc["id"] == big          # most-messages private wins, group excluded
 
 
+def test_primary_conversation_prefers_most_recent_over_more_messages():
+    # a freshly-active chat (fewer msgs but newer) beats a stale chat with more history
+    conn = db.connect(":memory:"); db.init_db(conn)
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    stale = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="old", name="张三")
+    db.link_person(conn, stale, "u1")
+    db.insert_messages(conn, stale, [ingest.MsgRecord(msg_key=f"o{i}", ts=100 + i, content="x", direction="in") for i in range(5)])
+    fresh = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="new", name="张三")
+    db.link_person(conn, fresh, "u1")
+    db.insert_messages(conn, fresh, [ingest.MsgRecord(msg_key="n1", ts=9999, content="刚聊", direction="in")])
+    assert assist.primary_conversation(conn, "u1")["id"] == fresh   # recency wins
+
+
 def test_primary_conversation_none_when_no_conversation():
     conn = db.connect(":memory:"); db.init_db(conn)
     db.upsert_person(conn, id="cold", name="王五", category="biz", threshold_days=7, aliases=[])
