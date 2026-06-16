@@ -96,6 +96,19 @@ def parse_sessions(text: str) -> list[dict]:
     return out
 
 
+def parse_contact_wxid(text: str) -> str:
+    """First contact id from `get_contacts` prose (`wxid_x  备注: A  昵称: B`). '' if none.
+    The id may be a raw wxid_… or a custom WeChat id (kerwinlu…); we take the first token."""
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith(("找到", "未找到", "搜索")):
+            continue
+        toks = line.split()
+        if toks:
+            return toks[0]
+    return ""
+
+
 def parse_history(text: str, *, self_label: str = "me") -> list[ingest.MsgRecord]:
     """Parse `get_chat_history` prose → [MsgRecord].
 
@@ -228,26 +241,37 @@ class PowerDataAdapter(ingest.IngestAdapter):
         return env["result"]["content"][0]["text"]
 
     # ---- IngestAdapter contract --------------------------------------------
-    def list_conversations(self, account) -> list[ingest.ConvRecord]:
-        # chat_id uses the contact name (PowerData addresses by name, no wxid out).
-        # TODO: backfill wxid via get_contacts for cross-tool identity unification.
+    def resolve_wxid(self, account, name):
+        """Contact NAME → its wxid (stable cross-account id) via get_contacts; falls back
+        to the name if unresolved. Enables cross-tool/account person unification."""
+        try:
+            return parse_contact_wxid(
+                self._call("get_contacts", account=account, query=name)) or name
+        except Exception:
+            return name
+
+    def list_conversations(self, account, resolve_wxid=True) -> list[ingest.ConvRecord]:
+        """chat_id = the contact's wxid (resolved via get_contacts) so it aligns with
+        other wechat tools for cross-account归一; `name` keeps the display label (and is
+        what PowerData addresses history by). Set resolve_wxid=False to skip the lookups."""
         text = self._call("get_recent_sessions", account=account, limit=50)
-        return [
-            ingest.ConvRecord(
-                chat_id=s["name"],
-                name=s["name"],
+        out = []
+        for s in parse_sessions(text):
+            wxid = (self.resolve_wxid(account, s["name"])
+                    if (resolve_wxid and not s["is_group"]) else s["name"])
+            out.append(ingest.ConvRecord(
+                chat_id=wxid, name=s["name"],
                 type="group" if s["is_group"] else "private",
-                muted=s["is_group"],
-                unread=s["unread"],
-            )
-            for s in parse_sessions(text)
-        ]
+                muted=s["is_group"], unread=s["unread"]))
+        return out
 
     def pull_new(self, account, recent_limit=30):
-        """[(ConvRecord, [MsgRecord])] — each session with its newest messages."""
+        """[(ConvRecord, [MsgRecord])] — each session with its newest messages. History is
+        queried by NAME (PowerData addresses by name), while chat_id carries the wxid."""
         out = []
         for conv in self.list_conversations(account):
-            text = self._call("get_chat_history", chat_name=conv.chat_id, limit=recent_limit)
+            text = self._call("get_chat_history", account=account,
+                              chat_name=conv.name, limit=recent_limit)
             out.append((conv, parse_history(text)))
         return out
 

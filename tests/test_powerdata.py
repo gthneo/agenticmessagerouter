@@ -145,7 +145,7 @@ def test_backfill_returns_done():
 def test_list_conversations_maps_sessions(monkeypatch):
     a = pd.PowerDataAdapter(token="x")
     monkeypatch.setattr(a, "_call", lambda name, **kw: SESSIONS_SAMPLE)
-    convs = a.list_conversations(None)
+    convs = a.list_conversations(None, resolve_wxid=False)   # skip wxid lookups for this mapping test
     assert [c.chat_id for c in convs] == ["工聯會福州家長群", "历史与影像"]
     grp = convs[0]
     assert grp.type == "group" and grp.muted is True and grp.unread == 575
@@ -180,3 +180,10 @@ def test_parse_sessions_handles_missing_unread_and_group():
     assert by["福州家長群"]["is_group"] and by["福州家長群"]["unread"] == 575
     assert by["代码班迪"]["is_group"] is False and by["代码班迪"]["unread"] == 0   # no 未读 suffix
     assert "shirley2775~养虾人🦐" in by                                         # bare entry parsed
+
+
+def test_parse_contact_wxid_first_id():
+    from jl.channels import powerdata
+    txt = "找到 1 个联系人（搜索: 张三）:\n\nwxid_test_0001  备注: 张三  昵称: 小三"
+    assert powerdata.parse_contact_wxid(txt) == "wxid_test_0001"
+    assert powerdata.parse_contact_wxid("未找到匹配") == ""

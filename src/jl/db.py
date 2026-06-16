@@ -6,6 +6,7 @@ accounting. All times are unix seconds.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -310,6 +311,40 @@ def link_person(conn, conversation_id, person_id):
     conn.execute("UPDATE conversations SET person_id=?, updated_at=? WHERE id=?",
                  (person_id, _now(), conversation_id))
     conn.commit()
+
+
+def unify_by_wxid(conn):
+    """Cross-account/tool 联系人归一: merge PRIVATE wechat conversations that share a
+    chat_id (= wxid, a stable cross-account id) into ONE person. Prefers an existing person
+    holding that wxid channel; else creates `wx-<hash>`. Self identities are skipped (your
+    own accounts are not contacts). Returns {persons, linked}."""
+    self_ids = {s["identifier"] for s in get_self_identities(conn) if s["kind"] == "wechat"}
+    groups = {}
+    for c in conn.execute(
+            "SELECT id, chat_id, name, person_id FROM conversations "
+            "WHERE platform='wechat' AND type='private'"):
+        wxid = c["chat_id"]
+        if not wxid or wxid in self_ids:
+            continue
+        groups.setdefault(wxid, []).append(dict(c))
+    persons = linked = 0
+    for wxid, convs in groups.items():
+        row = conn.execute("SELECT person_id FROM channels WHERE kind='wechat' AND identifier=?",
+                           (wxid,)).fetchone()
+        pid = (row["person_id"] if row else None) or next(
+            (c["person_id"] for c in convs if c["person_id"]), None)
+        if not pid:
+            name = next((c["name"] for c in convs if c["name"]), wxid)
+            pid = "wx-" + hashlib.sha1(wxid.encode()).hexdigest()[:8]
+            upsert_person(conn, id=pid, name=name, category="", threshold_days=7, aliases=[])
+            persons += 1
+        upsert_channel(conn, person_id=pid, kind="wechat", identifier=wxid)
+        for c in convs:
+            if c["person_id"] != pid:
+                conn.execute("UPDATE conversations SET person_id=? WHERE id=?", (pid, c["id"]))
+                linked += 1
+    conn.commit()
+    return {"persons": persons, "linked": linked}
 
 
 def unlink_conversation(conn, conversation_id):

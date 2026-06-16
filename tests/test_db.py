@@ -218,3 +218,24 @@ def test_record_tokens_accumulates_usage(conn):
     assert total["reach_count"] == 3
     assert total["tokens_in"] == 120
     assert total["tokens_out"] == 40
+
+
+def test_unify_by_wxid_merges_same_wxid_across_accounts(conn):
+    from jl import ingest
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="wxid_me", tool="fullwechat")
+    db.upsert_account(conn, account_id=5, platform="wechat", self_id="wxid_oki8", tool="powerdata")
+    db.add_self_identity(conn, "wechat", "wxid_me")
+    db.add_self_identity(conn, "wechat", "wxid_oki8")
+    # same contact (wxid_shir) reachable from BOTH accounts → must merge to ONE person
+    a = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_shir", name="Shirley")
+    b = db.upsert_conversation(conn, account_id=5, platform="wechat", chat_id="wxid_shir", name="养虾人")
+    # a self chat must be skipped
+    sc = db.upsert_conversation(conn, account_id=5, platform="wechat", chat_id="wxid_oki8", name="自己")
+    # a different contact stays separate
+    d = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_other", name="李四")
+    out = db.unify_by_wxid(conn)
+    pa = db.get_conversation(conn, a)["person_id"]
+    pb = db.get_conversation(conn, b)["person_id"]
+    assert pa and pa == pb                                  # both Shirley convs → one person
+    assert db.get_conversation(conn, sc)["person_id"] is None   # self chat skipped
+    assert db.get_conversation(conn, d)["person_id"] != pa      # different wxid not merged
