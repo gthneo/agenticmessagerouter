@@ -291,8 +291,8 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
 <div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button><b id=title>选择会话</b></div><div id=msgs></div>
  <div id=suggest></div>
- <div id=replybox><textarea id=reply rows=2 placeholder="草拟回复…（确认后才会发送）"></textarea>
- <button onclick="draft()">草拟回复 → outbox</button>
+ <div id=replybox><textarea id=reply rows=2 placeholder="点上面「用此版」填入，可改；「暂存待发」后去左边确认真发"></textarea>
+ <button onclick="draft()">暂存待发 →</button>
  <button onclick="aiDraft()">✨ AI 拟话术</button></div></div>
 <script>
 const TOK=new URLSearchParams(location.search).get('token')||'';
@@ -310,7 +310,7 @@ async function openConv(id){window.CURCONV=id;const m=await E('/conversations/'+
 window.SUG={};
 async function loadSuggestions(id){const s=await E('/conversations/'+id+'/suggestions');
  window.SUG={};s.forEach(x=>window.SUG[x.id]=x.body);
- document.getElementById('suggest').innerHTML=(s.length?'<div class=p>✨ 话术建议（挑一版填入回复框）:</div>':'')+
+ document.getElementById('suggest').innerHTML=(s.length?'<div class=p>✨ '+(s[0].kind==='opener'?'主动开场':'话术')+'（用此版填入下方，可改）:</div>':'')+
  s.map(x=>`<div class=ob><div class=p>[${esc(x.stance)}]</div><div class=b>${esc(x.body)}</div>
  <button onclick="useDraft(${x.id})">用此版</button> <button onclick="dismissSug(${x.id})">✕</button></div>`).join('')}
 function useDraft(id){document.getElementById('reply').value=window.SUG[id]||'';}

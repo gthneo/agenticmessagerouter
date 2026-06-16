@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -16,6 +17,34 @@ from .. import ingest
 
 DEFAULT_URL = os.environ.get("AGENT_WECHAT_URL", "http://192.168.31.178:6174")
 SOURCE = "fullwx"
+
+# WeChat message-type → human placeholder. Non-text messages carry raw XML in
+# `content`; without this they dump <msg>…cdnthumb…</msg> blobs into the timeline.
+_TYPE_PLACEHOLDER = {
+    3: "[图片]", 34: "[语音]", 42: "[名片]", 43: "[视频]",
+    47: "[表情]", 48: "[位置]", 62: "[小视频]", 2000: "[转账]", 2001: "[红包]",
+}
+_TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
+
+
+def clean_content(msg_type, content):
+    """Turn a raw message into display text. Text → itself; media → a placeholder;
+    app messages (49) → '[链接] <title>'; leaked XML in any type → a placeholder."""
+    try:
+        t = int(msg_type)
+    except (TypeError, ValueError):
+        t = 1
+    c = content or ""
+    if t in _TYPE_PLACEHOLDER:
+        return _TYPE_PLACEHOLDER[t]
+    if t == 49 or "<appmsg" in c:
+        m = _TITLE_RE.search(c)
+        title = (m.group(1).strip() if m else "")
+        return f"[链接] {title}" if title else "[链接/文件]"
+    # defensive: a media blob mislabeled as text must not leak raw XML
+    if c.lstrip().startswith("<") and ("<msg" in c or "cdnthumb" in c or "<img" in c):
+        return "[图片]"
+    return c
 
 _SKIP_PREFIXES = ("gh_", "placeholder", "_")
 _SKIP_IDS = {"brandsessionholder"}
@@ -67,7 +96,7 @@ def map_message(msg):
     return ingest.MsgRecord(
         msg_key=ingest.msg_key(source=SOURCE, stable_id=stable),
         ts=_ts(msg.get("timestamp")),
-        content=msg.get("content", "") or "",
+        content=clean_content(msg.get("type"), msg.get("content", "") or ""),
         sender=msg.get("senderName", "") or "",
         sender_id=msg.get("sender", "") or "",
         # NOTE: always inbound in this MVP — outbound detection (sender == self wxid)
@@ -129,8 +158,22 @@ class FullWechatAdapter(ingest.IngestAdapter):
             out.append((conv, self._messages(conv.chat_id, recent_limit, 0)))
         return out
 
+    def _live_chat_ids(self):
+        """Set of currently-selectable chat ids, or None if the list can't be fetched."""
+        try:
+            chats = self._get("/api/chats?limit=200&offset=0")
+            return {c.get("id") for c in chats}
+        except Exception:
+            return None  # unknown — don't block the send on a failed pre-check
+
     def send(self, chat_id, text):
-        """Send a text message via fullwechat. Returns (ok, error)."""
+        """Send a text message via fullwechat. Returns (ok, error). Pre-checks that the
+        target is selectable so a stale/raw-wxid chat_id fails with an actionable message
+        instead of the backend's cryptic 'No action selected'. Never guesses a target."""
+        live = self._live_chat_ids()
+        if live is not None and chat_id not in live:
+            return False, ("TA 不在微信近期会话,发送端选不中。先在微信里打开与 TA 的对话,"
+                           "或用「连渠道」把 TA 连到正确的微信会话,再发。")
         body = json.dumps({"chatId": chat_id, "text": text}).encode("utf-8")
         req = urllib.request.Request(self.url + "/api/messages/send", data=body,
                                      method="POST",
@@ -141,7 +184,10 @@ class FullWechatAdapter(ingest.IngestAdapter):
                 res = json.loads(r.read().decode("utf-8", "replace"))
         except Exception as e:  # surface any transport error to the human
             return False, str(e)
-        return bool(res.get("success")), res.get("error", "") or ""
+        ok, err = bool(res.get("success")), res.get("error", "") or ""
+        if not ok and "no action" in err.lower():
+            err = "发送端选不中该会话(TA 可能不在微信近期列表)。先在微信里打开与 TA 的对话再发。"
+        return ok, err
 
 
 def send_text(chat_id, text):

@@ -17,6 +17,37 @@ def test_map_message_to_msgrecord():
     assert m.is_mentioned is False
 
 
+def test_clean_content_text_passes_through():
+    assert fw.clean_content(1, "你好呀") == "你好呀"
+
+
+def test_clean_content_media_types_become_placeholders():
+    assert fw.clean_content(3, "<msg><img cdnthumburl='x'/></msg>") == "[图片]"
+    assert fw.clean_content(34, "...") == "[语音]"
+    assert fw.clean_content(43, "...") == "[视频]"
+    assert fw.clean_content(47, "...") == "[表情]"
+    assert fw.clean_content(48, "...") == "[位置]"
+    assert fw.clean_content(42, "...") == "[名片]"
+
+
+def test_clean_content_app_msg_extracts_title_else_placeholder():
+    xml = "<msg><appmsg><title>一篇好文章</title><url>http://x</url></appmsg></msg>"
+    assert fw.clean_content(49, xml) == "[链接] 一篇好文章"
+    assert fw.clean_content(49, "<msg><appmsg></appmsg></msg>") == "[链接/文件]"
+
+
+def test_clean_content_strips_leaked_xml_even_if_typed_text():
+    # defensive: a media blob mislabeled type=1 must not dump raw XML into the timeline
+    blob = '<msg><img cdnthumburl="305f02..." cdnthumbaeskey="750b3c"/></msg>'
+    assert fw.clean_content(1, blob) == "[图片]"
+
+
+def test_map_message_uses_clean_content_for_media():
+    raw = {"localId": 5, "type": 3, "content": "<msg><img cdnthumburl='z'/></msg>",
+           "senderName": "张三", "sender": "wxid_a", "timestamp": "2026-06-14T08:00:00+00:00"}
+    assert fw.map_message(raw).content == "[图片]"
+
+
 def test_map_message_falls_back_to_serverid_when_no_localid():
     raw = {"localId": 0, "serverId": 12345, "chatId": "m1", "sender": "x",
            "senderName": "Y", "type": 1, "content": "hi",

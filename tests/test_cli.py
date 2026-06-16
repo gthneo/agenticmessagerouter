@@ -40,6 +40,11 @@ def test_route_watch_toggle():
     assert cli.route(["关注", "--off", "张三"]) == ("watch", {"name": "张三", "on": False})
 
 
+def test_route_connect_channel():
+    assert cli.route(["连", "张三", "adambb_joy"]) == ("connect", {"name": "张三", "chat_id": "adambb_joy"})
+    assert cli.route(["连渠道", "张三", "m123"]) == ("connect", {"name": "张三", "chat_id": "m123"})
+
+
 # ----- command wiring (messages-derived path, real in-memory db) ------------
 
 @pytest.fixture

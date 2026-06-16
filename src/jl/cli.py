@@ -79,6 +79,10 @@ def route(args):
     if a in ("关注", "--watch"):
         name = next((x for x in args[1:] if not x.startswith("--")), None)
         return ("watch", {"name": name, "on": "--off" not in args})
+    if a in ("连", "连渠道"):
+        rest = [x for x in args[1:] if not x.startswith("--")]
+        return ("connect", {"name": rest[0] if rest else None,
+                            "chat_id": rest[1] if len(rest) > 1 else None})
     return ("detail", {"name": a})
 
 
@@ -289,6 +293,32 @@ def cmd_draft_assist(conn, ctx):
         print(f"✨ 自动拟稿: {len(touched)} 个待回会话已生成话术")
 
 
+def cmd_connect(conn, ctx):
+    """Link a person to a live fullwechat chat id, pulling its recent messages so the
+    chat becomes a real (sendable) send target. Fixes 'reachable-but-not-linked' people
+    (e.g. a cold contact whose WeChat exists) and lets a stale link be re-pointed."""
+    from . import ingest
+    from .channels.fullwechat import FullWechatAdapter, DEFAULT_URL
+    name, chat_id = ctx.get("name"), ctx.get("chat_id")
+    p = _find_person(conn, name) if name else None
+    if not p or not chat_id:
+        print("用法: jl 连 <名> <微信chat_id>（chat_id 是 fullwechat 的 id，如 m… / adambb_joy）")
+        return
+    aid = _ensure_account(conn, 1, "wechat", "fullwechat #1", DEFAULT_URL)
+    try:
+        msgs = FullWechatAdapter()._messages(chat_id, 30, 0)
+    except Exception as e:
+        print(f"⚠️ 拉取 {chat_id} 失败: {e}")
+        return
+    conv = ingest.ConvRecord(chat_id=chat_id, name=p["name"], type="private")
+    cid, n = db.ingest_records(conn, account_id=aid, platform="wechat", conv=conv, msgs=msgs)
+    db.link_person(conn, cid, p["id"])
+    db.log_event(conn, kind="connect", person_id=p["id"], actor=_actor(),
+                 detail={"chat_id": chat_id, "msgs": n})
+    print(f"🔗 已把 {p['name']} 连到微信会话 {chat_id}（会话 {cid}，拉到 {n} 条）。"
+          f"\n   jl 主动 {p['id']} 可拟开场。")
+
+
 def cmd_watch(conn, ctx):
     name = ctx.get("name")
     on = ctx.get("on", True)
@@ -403,6 +433,8 @@ def main(argv=None):
         ctx.update(params); cmd_proactive(conn, ctx)
     elif command == "watch":
         ctx.update(params); cmd_watch(conn, ctx)
+    elif command == "connect":
+        ctx.update(params); cmd_connect(conn, ctx)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()
