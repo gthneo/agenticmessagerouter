@@ -3,11 +3,12 @@ N stance-varied 话术 versions, store as suggestions. LLM-optional (no llm → 
 Sending stays behind the outbox HITL gate — this only proposes."""
 from __future__ import annotations
 
+import os
 import re
 
 from . import db, llm as _llm
 
-# 1a style guide (phase-A). Method content (M1–M8/Cialdini) injected in 1b.
+# 1a style guide (phase-A). 1b folds in the method playbook (below) as background.
 STYLE_GUIDE = (
     "你是用户的中文沟通助手,为下面这段对话起草回复。围绕把事做成、不树敌、给确定"
     "(具体时间/地点/动作,不用'等会/晚点'),宁可糙而真,不要美而假。"
@@ -15,8 +16,32 @@ STYLE_GUIDE = (
     "风格依次为: 稳妥 / 直接 / 有温度。只输出这 {n} 行,不要额外说明。"
 )
 
+# 1b: the method playbook (M1–M8 + 《影响力》/Cialdini) is injected as *background
+# guidance*, not as new stances. The guardrail keeps it from sliding into manipulation.
+# The playbook *content* lives in a local file OUTSIDE this public repo (see load_playbook).
+PLAYBOOK_GUIDANCE = (
+    "\n\n以下是你的「打法库」(沟通方法 + 影响力原则),当作底料融入上面三档回复:"
+    "可借其中原则让话更有说服力,但务必守底线——不操纵、不欺骗、不树敌,"
+    "一切围绕把事做成、给对方确定。打法库:\n"
+)
 
-def build_context(conn, conversation_id, recent=12):
+
+def _playbook_path():
+    return os.environ.get("AMR_PLAYBOOK") or os.path.expanduser("~/.config/jl/playbook.md")
+
+
+def load_playbook():
+    """Read the local method playbook (M1–M8 + Cialdini). Its content lives OUTSIDE the
+    public repo; an absent/unreadable file → '' so we degrade to the 1a style guide.
+    Never raises — LLM-optional, and the playbook is optional on top of that."""
+    try:
+        with open(_playbook_path(), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def build_context(conn, conversation_id, recent=12, playbook=None):
     conv = db.get_conversation(conn, conversation_id)
     person = db.get_person(conn, conv["person_id"]) if conv and conv.get("person_id") else None
     rows = conn.execute(
@@ -29,6 +54,9 @@ def build_context(conn, conversation_id, recent=12):
     pname = (person or {}).get("name") or (conv or {}).get("name") or "对方"
     pcat = (person or {}).get("category") or ""
     sys = STYLE_GUIDE.format(n=3)
+    pb = load_playbook() if playbook is None else playbook
+    if pb:
+        sys = sys + PLAYBOOK_GUIDANCE + pb
     user = (f"对话对象: {pname}" + (f"(类别 {pcat})" if pcat else "") + "\n\n"
             "最近对话:\n" + "\n".join(lines) + "\n\n请起草回复。")
     return [{"role": "system", "content": sys}, {"role": "user", "content": user}]

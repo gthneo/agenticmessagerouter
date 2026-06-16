@@ -21,6 +21,33 @@ def test_build_context_includes_timeline_and_person():
     assert "在吗" in joined and "张三" in joined
 
 
+def test_load_playbook_reads_local_file(tmp_path, monkeypatch):
+    p = tmp_path / "playbook.md"
+    p.write_text("互惠原则: 先给后取。\nM4 给确定: 不用'等会'。", encoding="utf-8")
+    monkeypatch.setenv("AMR_PLAYBOOK", str(p))
+    assert "互惠原则" in assist.load_playbook() and "给确定" in assist.load_playbook()
+
+
+def test_load_playbook_absent_returns_empty(monkeypatch, tmp_path):
+    monkeypatch.setenv("AMR_PLAYBOOK", str(tmp_path / "nope.md"))
+    assert assist.load_playbook() == ""   # absent → degrade to base style guide
+
+
+def test_build_context_injects_playbook_when_present():
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    msgs = assist.build_context(conn, cid, playbook="互惠原则: 先给后取。")
+    sysmsg = next(m["content"] for m in msgs if m["role"] == "system")
+    assert "互惠原则" in sysmsg            # playbook content injected
+    assert "守底线" in sysmsg or "不操纵" in sysmsg   # guardrail framing present
+
+
+def test_build_context_no_playbook_keeps_base_guide():
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    msgs = assist.build_context(conn, cid, playbook="")
+    sysmsg = next(m["content"] for m in msgs if m["role"] == "system")
+    assert "打法库" not in sysmsg          # no playbook → no method block, 1a unchanged
+
+
 def test_parse_versions_splits_numbered_blocks():
     raw = "1) 稳妥: 您好,稍后回复\n2) 直接: 现在不方便\n3) 有温度: 在的,马上看"
     vs = assist.parse_versions(raw)
