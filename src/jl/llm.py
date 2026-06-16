@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import time
 import urllib.request
 from dataclasses import dataclass
@@ -12,6 +14,9 @@ from dataclasses import dataclass
 from . import db
 
 CLAUDE_MODEL = os.environ.get("AMR_CLAUDE_MODEL", "claude-opus-4-8")
+# claude_code provider: shell out to the `claude` CLI (Max plan, no API key).
+CLAUDE_CODE_BIN = os.environ.get("AMR_CLAUDE_BIN", "claude")
+CLAUDE_CODE_MODEL = os.environ.get("AMR_CLAUDE_CODE_MODEL", CLAUDE_MODEL)
 
 
 @dataclass
@@ -59,16 +64,68 @@ def _claude(messages, *, max_tokens=1024, **opts):
                      latency_ms=int((time.time() - t0) * 1000), ok=True)
 
 
-PROVIDERS = {"claude": _claude}
+def _claude_code_bin():
+    """Resolve the `claude` CLI path, or None if unavailable (LLM-optional)."""
+    if os.path.isabs(CLAUDE_CODE_BIN):
+        return CLAUDE_CODE_BIN if os.path.exists(CLAUDE_CODE_BIN) else None
+    return shutil.which(CLAUDE_CODE_BIN)
+
+
+def _claude_code(messages, *, timeout=120, **opts):
+    """Provider backed by the Claude Code CLI (Max plan — no ANTHROPIC_API_KEY needed).
+    Shells `claude -p --output-format json`, full-replacing the system prompt so drafts
+    are free of the CLI's coding-agent persona. Token usage parsed from the JSON result."""
+    binpath = _claude_code_bin()
+    if not binpath:
+        return LLMResult(ok=False, error="llm_unavailable")
+    system_parts, user_parts = [], []
+    for m in messages:
+        (system_parts if m.get("role") == "system" else user_parts).append(m["content"])
+    prompt = "\n\n".join(user_parts)
+    args = [binpath, "-p", "--output-format", "json", "--model", CLAUDE_CODE_MODEL]
+    system = "\n".join(system_parts).strip()
+    if system:
+        args += ["--system-prompt", system]
+    t0 = time.time()
+    try:
+        proc = subprocess.run(args, input=prompt, capture_output=True,
+                              text=True, timeout=timeout)
+    except Exception as e:  # subprocess/timeout failure → degrade, never raise
+        return LLMResult(ok=False, error=str(e), latency_ms=int((time.time() - t0) * 1000))
+    lat = int((time.time() - t0) * 1000)
+    if proc.returncode != 0:
+        return LLMResult(ok=False, latency_ms=lat,
+                         error=(proc.stderr or f"claude exited {proc.returncode}")[:300])
+    try:
+        d = json.loads(proc.stdout or "{}")
+    except ValueError as e:
+        return LLMResult(ok=False, error=f"bad claude json: {e}", latency_ms=lat)
+    if d.get("is_error"):
+        return LLMResult(ok=False, latency_ms=lat,
+                         error=str(d.get("result") or "claude reported error"))
+    usage = d.get("usage") or {}
+    tokens_in = (usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+                 + usage.get("cache_creation_input_tokens", 0))
+    return LLMResult(text=d.get("result", ""), provider="claude_code",
+                     model=CLAUDE_CODE_MODEL, tokens_in=tokens_in,
+                     tokens_out=usage.get("output_tokens", 0), latency_ms=lat, ok=True)
+
+
+PROVIDERS = {"claude": _claude, "claude_code": _claude_code}
 
 
 def available():
-    """True if any provider is usable right now (1a: Claude key present)."""
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    """True if any provider is usable right now (LLM-optional gate)."""
+    return route("reply") is not None
 
 
 def route(task):
-    """Pick a provider name for a task, or None if none available (LLM-optional)."""
+    """Pick a provider name for a task, or None if none available (LLM-optional).
+    `AMR_LLM_PROVIDER` explicitly pins a provider (e.g. claude_code to dogfood the
+    Max plan on .178); otherwise fall back to the Claude API when a key is present."""
+    pref = os.environ.get("AMR_LLM_PROVIDER")
+    if pref in PROVIDERS:
+        return pref
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "claude"
     return None

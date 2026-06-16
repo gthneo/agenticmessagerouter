@@ -23,7 +23,7 @@ Elevate AMR from router to **intelligent hub**: when a message arrives, AMR draf
   - `route(task)`: maps a task to a preferred provider with availability fallback (1a: trivially → claude if configured, else the LLM-optional path).
   - **LLM-optional**: if no provider is configured/reachable, `complete` returns `LLMResult(ok=False, error="llm_unavailable", text="")`. Callers MUST treat `ok=False` as "no assist" and degrade to manual — never block.
   - **Token accounting**: on every call, if `conn` given, write `db.record_tokens(channel_kind="llm", op=task, tokens_in, tokens_out)`. Always visible via `jl --tokens`.
-- `claude` provider: **subprocess to the already-logged-in `claude` CLI on .178** (no API key needed) — `claude -p "<prompt>" --output-format json`, which returns `{result, usage:{input_tokens, output_tokens}, ...}`. Parse `result` → text and `usage` → token counts (feeds accounting). Pure-stdlib `subprocess`/`json`. Reuses the host's Claude Code auth (verified working on .178). Subprocess/parse errors → `ok=False` (caught), never raise.
+- `claude` provider: HTTP to the Anthropic API using `ANTHROPIC_API_KEY` (env, on .178). Pure-stdlib `urllib`. Model: the latest Claude (configurable). Transport errors → `ok=False` (caught), never raise to the caller.
 
 ### 2. `suggestions` table + `src/jl/assist.py` — the draft assistant
 - New table `suggestions`: `id, conversation_id, version_idx, stance, body, llm_provider, llm_model, status (suggested|used|dismissed), created_at`. Separate from `outbox` (outbox stays = only human-committed drafts; suggestions = AI candidates).
@@ -60,4 +60,4 @@ inbound → (poll, scoped) `generate_drafts` → `suggestions` → inbox shows N
 M1–M8/Cialdini methods (1b), graduated autonomy (1c), Ollama/routing, non-wechat channels for assist (the assist is channel-agnostic via conversations, but first verified on wechat), image/file replies.
 
 ## Prereq
-None blocking — the `claude` provider uses the already-logged-in Claude Code CLI on .178 (no API key). If `claude` is absent/unauthed/unreachable, 1a still ships: assist shows "未配置 LLM" and manual compose works (LLM-optional proof). The `claude` binary path / availability is detected at call time.
+`ANTHROPIC_API_KEY` on .178 (王总 to provide / I configure to env). Without it, 1a still ships — assist simply shows "未配置 LLM" and manual compose works (LLM-optional proof).
