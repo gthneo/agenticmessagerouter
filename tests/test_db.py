@@ -98,6 +98,43 @@ def test_ensure_columns_adds_missing_on_old_db():
     c.close()
 
 
+def test_dedup_channels_folds_phone_format_variants(conn):
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_channel(conn, person_id="u1", kind="phone", identifier="13686472775")
+    db.upsert_channel(conn, person_id="u1", kind="phone", identifier="+8613686472775")  # same canon
+    db.upsert_channel(conn, person_id="u1", kind="phone", identifier="13760177688")      # distinct
+    db.upsert_channel(conn, person_id="u1", kind="wechat", identifier="wxid_a")
+    folded = db.dedup_channels(conn)
+    ids = sorted((c["kind"], c["identifier"]) for c in db.get_channels(conn, "u1"))
+    assert folded == 1
+    assert ids == [("phone", "13686472775"), ("phone", "13760177688"), ("wechat", "wxid_a")]
+
+
+def test_endpoints_with_recency_per_identifier(conn):
+    from jl import ingest
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    db.upsert_account(conn, account_id=2, platform="phone", self_id="s")
+    a = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_a", name="张三")
+    b = db.upsert_conversation(conn, account_id=2, platform="phone", chat_id="13686472775", name="张三")
+    for cid in (a, b):
+        db.link_person(conn, cid, "u1")
+    db.insert_messages(conn, a, [ingest.MsgRecord(msg_key="a1", ts=100, content="x", direction="in")])
+    db.insert_messages(conn, b, [ingest.MsgRecord(msg_key="b1", ts=200, content="y", direction="in")])
+    by = {(e["kind"], e["identifier"]): e for e in db.endpoints_with_recency(conn, "u1")}
+    assert by[("wechat", "wxid_a")]["last_ts"] == 100      # each endpoint keeps its own recency
+    assert by[("phone", "13686472775")]["last_ts"] == 200  # not collapsed one-per-platform
+    assert by[("wechat", "wxid_a")]["conversation_id"] == a
+
+
+def test_set_endpoint_pin_marks_one_endpoint(conn):
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_channel(conn, person_id="u1", kind="wechat", identifier="wxid_a")
+    db.set_endpoint_pin(conn, "u1", "wechat", "wxid_a", True)
+    chans = {(c["kind"], c["identifier"]): c for c in db.get_channels(conn, "u1")}
+    assert chans[("wechat", "wxid_a")]["pinned"] == 1
+
+
 def test_dedup_phone_conversations_merges_format_variants(conn):
     from jl import ingest
     db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])

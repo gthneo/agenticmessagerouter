@@ -44,11 +44,12 @@ def extract_text(msg_type, content):
 
 
 def map_chat(chat):
+    is_p2p = chat.get("chat_mode") == "p2p"
     return ingest.ConvRecord(
         chat_id=chat["chat_id"],
         name=chat.get("name", ""),
-        type="group",                 # chat-list returns group/topic only
-        muted=True,                   # groups arrive muted (overload control)
+        type="private" if is_p2p else "group",
+        muted=not is_p2p,             # groups arrive muted; DMs are active endpoints
     )
 
 

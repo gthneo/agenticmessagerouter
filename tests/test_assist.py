@@ -130,6 +130,21 @@ def test_primary_conversation_prefers_most_recent_over_more_messages():
     assert assist.primary_conversation(conn, "u1")["id"] == fresh   # recency wins
 
 
+def test_primary_conversation_uses_best_endpoint(monkeypatch):
+    conn = db.connect(":memory:"); db.init_db(conn)
+    db.upsert_person(conn, id="u1", name="张三", category="biz", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="s")
+    stale = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_stale", name="张三")
+    live = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_live", name="张三")
+    for cid in (stale, live):
+        db.link_person(conn, cid, "u1")
+    db.insert_messages(conn, stale, [ingest.MsgRecord(msg_key="s1", ts=999, content="x", direction="in")])
+    db.insert_messages(conn, live, [ingest.MsgRecord(msg_key="l1", ts=1, content="y", direction="in")])
+    # only wxid_live is sendable → routing picks it despite lower recency
+    monkeypatch.setattr(assist, "_sendable_chat_ids", lambda: {"wxid_live"})
+    assert assist.primary_conversation(conn, "u1")["chat_id"] == "wxid_live"
+
+
 def test_primary_conversation_none_when_no_conversation():
     conn = db.connect(":memory:"); db.init_db(conn)
     db.upsert_person(conn, id="cold", name="王五", category="biz", threshold_days=7, aliases=[])

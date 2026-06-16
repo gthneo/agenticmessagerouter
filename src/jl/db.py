@@ -34,6 +34,7 @@ def connect(path: str = DEFAULT_DB) -> sqlite3.Connection:
 _ADDED_COLUMNS = {
     "persons": [("watch", "INTEGER NOT NULL DEFAULT 0")],
     "suggestions": [("kind", "TEXT NOT NULL DEFAULT 'reply'")],
+    "channels": [("pinned", "INTEGER NOT NULL DEFAULT 0")],
 }
 
 
@@ -207,6 +208,60 @@ def get_conversations(conn, *, muted=None, person_id="__all__", account_id=None)
 def set_muted(conn, conversation_id, muted):
     conn.execute("UPDATE conversations SET muted=?, updated_at=? WHERE id=?",
                  (1 if muted else 0, _now(), conversation_id))
+    conn.commit()
+
+
+def _canon_identifier(kind, identifier):
+    """Canonical comparable id for an endpoint (phone → canon_phone; else as-is)."""
+    if kind == "phone":
+        from .channels.phone import canon_phone
+        return canon_phone(identifier)
+    return identifier
+
+
+def dedup_channels(conn):
+    """Fold endpoint rows sharing a canonical identifier (e.g. phone +86 variants) and
+    canonicalize survivors. Distinct identifiers stay separate. Returns count folded."""
+    rows = conn.execute("SELECT id, person_id, kind, identifier FROM channels").fetchall()
+    groups = {}
+    for r in rows:
+        key = (r["person_id"], r["kind"], _canon_identifier(r["kind"], r["identifier"]))
+        groups.setdefault(key, []).append(dict(r))
+    folded = 0
+    for key, rs in groups.items():
+        survivor = rs[0]
+        for dup in rs[1:]:            # delete duplicates first → survivor canon can't collide
+            conn.execute("DELETE FROM channels WHERE id=?", (dup["id"],))
+            folded += 1
+        if key[2] and key[2] != survivor["identifier"]:
+            conn.execute("UPDATE channels SET identifier=? WHERE id=?", (key[2], survivor["id"]))
+    conn.commit()
+    return folded
+
+
+def endpoints_with_recency(conn, person_id):
+    """One row per (kind, canonical identifier) reachable for a person, each with its OWN
+    last-interaction ts + the conversation defining it. Endpoint-level (not platform-
+    collapsed) so a person fresh on one number and cold on another is seen."""
+    out = {}
+    for c in get_conversations(conn, person_id=person_id):
+        kind = c["platform"]
+        ident = _canon_identifier(kind, c["chat_id"])
+        n, last_ts = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(ts), 0) FROM messages WHERE conversation_id=?",
+            (c["id"],)).fetchone()
+        key = (kind, ident)
+        prev = out.get(key)
+        if prev is None or last_ts > prev["last_ts"]:
+            out[key] = {"kind": kind, "identifier": ident, "last_ts": last_ts,
+                        "msgs": n, "conversation_id": c["id"], "chat_id": c["chat_id"]}
+    return list(out.values())
+
+
+def set_endpoint_pin(conn, person_id, kind, identifier, on=True):
+    """Pin (or unpin) one endpoint as the human-chosen primary send target."""
+    conn.execute("UPDATE channels SET pinned=? WHERE person_id=? AND kind=? AND identifier=?",
+                 (1 if on else 0, person_id, kind, identifier))
     conn.commit()
 
 

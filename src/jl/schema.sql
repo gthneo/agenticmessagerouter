@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS channels (
     id         INTEGER PRIMARY KEY,
     person_id  TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
     kind       TEXT NOT NULL,                  -- wechat/phone/feishu/imsg/gmail/whatsapp/wecom
+    pinned     INTEGER NOT NULL DEFAULT 0,     -- 人钦点的首选发送端点
     identifier TEXT NOT NULL DEFAULT '',       -- wxid / phone / open_id / email ...
     label      TEXT NOT NULL DEFAULT '',       -- human display (chat_name etc.)
     meta       TEXT NOT NULL DEFAULT '{}',     -- JSON, channel-specific extras

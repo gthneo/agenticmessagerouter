@@ -40,6 +40,11 @@ def test_map_chat_group_muted():
     assert c.chat_id == "oc_1" and c.type == "group" and c.muted is True
 
 
+def test_map_p2p_chat_is_private_unmuted():
+    c = lark.map_chat({"chat_id": "oc_dm1", "name": "李四", "chat_mode": "p2p"})
+    assert c.type == "private" and c.muted is False   # DM = active endpoint
+
+
 def test_adapter_paginates_with_page_token(monkeypatch):
     a = lark.LarkAdapter()
     calls = []

@@ -116,21 +116,41 @@ def _person_days(conn, person_id):
     return chosen["days"] if chosen else None
 
 
+def _sendable_chat_ids():
+    """Live, selectable chat ids across sendable channels. Best-effort: a channel whose
+    live list can't be fetched contributes nothing (caller degrades). Network."""
+    ids = set()
+    try:
+        from .channels.fullwechat import FullWechatAdapter
+        live = FullWechatAdapter()._live_chat_ids()
+        if live:
+            ids |= {i for i in live if i}
+    except Exception:
+        pass
+    return ids
+
+
 def primary_conversation(conn, person_id):
-    """Pick the best send target for a proactive opener: a private conversation on a
-    sendable platform. Prefers the most-recently-active one (so a freshly-linked/used
-    chat wins over a stale duplicate), tie-broken by richer history. Returns dict or None."""
-    best, best_key = None, None
-    for c in db.get_conversations(conn, person_id=person_id):
-        if c.get("type") != "private" or c.get("platform") not in SENDABLE_PLATFORMS:
+    """Best send-target conversation, via endpoint routing (weight×recency, human pin
+    override, sendable fallback) over a person's多渠道多号 endpoints. When the live
+    chat list can't be fetched, every endpoint is treated sendable and recency decides
+    (network-optional). Returns the conversation dict or None."""
+    from . import routing
+    chans = {(c["kind"], c["identifier"]): c for c in db.get_channels(conn, person_id)}
+    eps = []
+    for e in db.endpoints_with_recency(conn, person_id):
+        if e["kind"] not in SENDABLE_PLATFORMS:
             continue
-        n, last_ts = conn.execute(
-            "SELECT COUNT(*), COALESCE(MAX(ts), 0) FROM messages WHERE conversation_id=?",
-            (c["id"],)).fetchone()
-        key = (last_ts, n)   # newest activity first, then more messages
-        if best_key is None or key > best_key:
-            best, best_key = c, key
-    return best
+        e = dict(e, pinned=(chans.get((e["kind"], e["identifier"])) or {}).get("pinned", 0))
+        eps.append(e)
+    if not eps:
+        return None
+    live = _sendable_chat_ids()
+    sendable = (lambda e: e["chat_id"] in live or e["identifier"] in live) if live else (lambda e: True)
+    best = routing.best_endpoint(eps, sendable=sendable)
+    if not best:   # nothing currently sendable → fall back to most-recent overall
+        best = routing.best_endpoint(eps, sendable=lambda e: True)
+    return db.get_conversation(conn, best["conversation_id"]) if best else None
 
 
 def build_opener_context(conn, person_id, recent=12, playbook=None):
