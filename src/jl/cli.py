@@ -70,6 +70,9 @@ def route(args):
         })
     if a == "link":
         return ("link", {})
+    if a == "draft-assist":
+        cid = args[1] if len(args) > 1 and not args[1].startswith("--") else None
+        return ("draft_assist", {"conversation_id": int(cid) if cid else None})
     return ("detail", {"name": a})
 
 
@@ -266,6 +269,20 @@ def cmd_link(conn, ctx):
             print(f"  • [{s['platform']}] {s['name']}  ?= {cand}")
 
 
+def cmd_draft_assist(conn, ctx):
+    from . import assist, llm
+    cid = ctx.get("conversation_id")
+    if not llm.available():
+        print("⚠️ 未配置 LLM(ANTHROPIC_API_KEY 缺)——助手不可用,请手敲。(LLM-optional)")
+        return
+    if cid:
+        n = assist.generate_drafts(conn, cid)
+        print(f"✨ 会话 {cid}: 生成 {n} 版话术(去收件箱挑/改/发)")
+    else:
+        touched = assist.auto_draft_sweep(conn)
+        print(f"✨ 自动拟稿: {len(touched)} 个待回会话已生成话术")
+
+
 # ----- helpers --------------------------------------------------------------
 
 def _find_person(conn, name):
@@ -322,6 +339,8 @@ def main(argv=None):
         ctx.update(params); cmd_push(conn, ctx)
     elif command == "link":
         cmd_link(conn, ctx)
+    elif command == "draft_assist":
+        ctx.update(params); cmd_draft_assist(conn, ctx)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()
