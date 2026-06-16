@@ -344,6 +344,32 @@ def test_suggest_merges_by_name(conn):
                for s in sugg)
 
 
+def test_suggest_merges_ranks_strong_signal_and_shows_evidence(conn):
+    # one person matches by PHONE TAIL (strong), another only by NAME (weak)
+    db.upsert_person(conn, id="real", name="老王", category="x", threshold_days=7, aliases=[])
+    db.upsert_channel(conn, person_id="real", kind="phone", identifier="+8613800001234")
+    db.upsert_person(conn, id="namesake", name="老王", category="x", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=2, platform="phone", self_id="s")
+    cv = db.upsert_conversation(conn, account_id=2, platform="phone", chat_id="13800001234", name="老王")
+    s = next(x for x in db.suggest_merges(conn) if x["conversation_id"] == cv)
+    assert s["peer"] == "13800001234"
+    assert s["candidates"][0]["id"] == "real"            # strong (phone tail) ranked first
+    assert s["candidates"][0]["strength"] == 3
+    assert any("尾号" in e for e in s["candidates"][0]["evidence"])  # evidence visible
+    assert any(ch["kind"] == "phone" for ch in s["candidates"][0]["channels"])  # channels shown
+
+
+def test_suggest_merges_splits_multi_name_drops_generic(conn):
+    db.upsert_person(conn, id="roy", name="王隽谦Roy", category="x", threshold_days=7, aliases=[])
+    db.upsert_person(conn, id="connie", name="王珺熙Connie", category="x", threshold_days=7, aliases=[])
+    db.upsert_account(conn, account_id=2, platform="phone", self_id="s")
+    cv = db.upsert_conversation(conn, account_id=2, platform="phone", chat_id="13000000000",
+                                name="王隽谦Roy/亲爱的妞/我/王珺熙Connie")
+    s = next(x for x in db.suggest_merges(conn) if x["conversation_id"] == cv)
+    ids = {p["id"] for p in s["candidates"]}
+    assert ids == {"roy", "connie"}      # both tokens matched separately; '我' dropped
+
+
 def test_persons_overview_only_lists_persons_with_convs(conn):
     db.upsert_person(conn, id="lisi", name="李四", category="x", threshold_days=14, aliases=[])
     db.upsert_person(conn, id="nobody", name="无会话", category="x", threshold_days=7, aliases=[])

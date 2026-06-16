@@ -423,9 +423,14 @@ async function loadProactive(){const ps=await E('/proactive');document.getElemen
  if(p.missing_channel)return `<div class=conv><div class=n>${tag} ${esc(p.name)} <span class=badge>缺渠道·救补</span></div><div class=p>${days} · 补微信/飞书号再拟</div></div>`;
  return `<div class=conv onclick="openConv(${p.conversation_id})"><div class=n>${tag} ${esc(p.name)} ${p.openers?`<span class=badge>${p.openers}版开场</span>`:''}</div><div class=p>${days}${p.openers?' · 点开挑/改/发':' · 待拟'}</div></div>`}).join('')||'<div class=p style=padding:8px>(无 关注/🔴 待联络)</div>'}
 async function loadCands(){const cs=await E('/merge-candidates');document.getElementById('cands').innerHTML=
- cs.map(c=>`<div class=cand><div class=n>${esc(c.name)} <span class=badge>${esc(c.platform)}</span></div>
- ${c.candidates.map(p=>`<div class=p>→ ${esc(p.name||p.id)}</div>
- <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`).join('')}
+ cs.map(c=>`<div class=cand><div class=n>${esc(c.name||c.peer)} <span class=badge>${esc(c.platform)}</span></div>
+ <div class=p>本会话标识：${esc(c.peer)}</div>
+ ${c.candidates.map(p=>{const star=p.strength>=3?'🟢强':(p.strength==2?'🟡中':'⚪弱');
+  const ev=(p.evidence||[]).join('、');
+  const chs=(p.channels||[]).map(x=>esc(x.identifier)).join(' · ')||'(无已知渠道)';
+  return `<div class=p>→ ${esc(p.name||p.id)} <span class=badge>${star}</span> ${esc(ev)}
+  <br><span style=color:#888>已有：${chs}</span></div>
+  <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`}).join('')}
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
 function goHome(){document.getElementById('title').textContent='选择会话';window.CURCONV=null;resetSendbar();
  document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';

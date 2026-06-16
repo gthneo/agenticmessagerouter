@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -377,23 +378,66 @@ def set_conversation_person(conn, conversation_id, person_id):
               detail={"conversation_id": conversation_id, "learned": row["chat_id"]})
 
 
+_GENERIC_NAMES = {"我", "self", "me", "本人"}
+_NAME_SPLIT = re.compile(r"[/／、,，|+&]+")
+
+
+def _name_tokens(name):
+    """Split a multi-name contact label ('Roy/我/Connie') into real name tokens —
+    drops generic/self tokens and single chars so they don't blind-match everyone."""
+    out = []
+    for t in _NAME_SPLIT.split(name or ""):
+        t = t.strip()
+        if len(t) > 1 and t not in _GENERIC_NAMES:
+            out.append(t)
+    return out
+
+
 def suggest_merges(conn, limit=50):
-    """HITL candidates: unlinked conversations whose name matches a person's name/alias.
-    Returns [{conversation_id, name, platform, candidates:[person dict]}]. No silent merge."""
+    """HITL merge candidates for unlinked conversations, ranked by signal strength with
+    visible evidence (so the human verifies — no blind name merge). Strength: 3=strong
+    (exact channel id / phone tail), 2=name token exact, 1=name substring. Each candidate
+    carries its channels (phone/wxid) so the human can cross-check & 查漏补缺.
+    Returns [{conversation_id, name, platform, peer, candidates:[person+strength+evidence+channels]}]."""
+    from .channels.phone import tail_match
     persons = get_persons(conn)
+    pchans = {p["id"]: get_channels(conn, p["id"]) for p in persons}
     out = []
     rows = conn.execute(
         "SELECT id, platform, name, chat_id FROM conversations WHERE person_id IS NULL "
-        "AND name != '' ORDER BY last_activity_at DESC LIMIT ?", (limit,)).fetchall()
+        "ORDER BY last_activity_at DESC LIMIT ?", (limit,)).fetchall()
     for c in rows:
-        cands = []
-        for p in persons:
-            keys = [k for k in ([p["name"]] + list(p.get("aliases", []))) if k]
-            if any(k in c["name"] or c["name"] in k for k in keys):
-                cands.append(p)
+        kind, peer = c["platform"], c["chat_id"]
+        cands = {}
+
+        def add(p, strength, ev):
+            cur = cands.get(p["id"])
+            if cur is None:
+                cands[p["id"]] = {**p, "strength": strength, "evidence": [ev],
+                                  "channels": [{"kind": ch["kind"], "identifier": ch["identifier"]}
+                                               for ch in pchans[p["id"]]]}
+            else:
+                cur["strength"] = max(cur["strength"], strength)
+                if ev not in cur["evidence"]:
+                    cur["evidence"].append(ev)
+
+        for p in persons:                                  # strong: channel match
+            for ch in pchans[p["id"]]:
+                if kind == "phone" and ch["kind"] == "phone" and tail_match(ch["identifier"], peer):
+                    add(p, 3, f"📱尾号{peer[-4:]}")
+                elif ch["kind"] == kind and ch["identifier"] == peer:
+                    add(p, 3, f"{kind} id 精确")
+        for t in _name_tokens(c["name"]):                  # name: exact token=2, substring=1
+            for p in persons:
+                keys = [k for k in ([p["name"]] + list(p.get("aliases", []))) if k and len(k) > 1]
+                if t in keys:
+                    add(p, 2, f"名「{t}」")
+                elif any(t in k or k in t for k in keys):
+                    add(p, 1, f"名~「{t}」")
         if cands:
+            ranked = sorted(cands.values(), key=lambda x: -x["strength"])
             out.append({"conversation_id": c["id"], "name": c["name"],
-                        "platform": c["platform"], "candidates": cands})
+                        "platform": kind, "peer": peer, "candidates": ranked})
     return out
 
 
