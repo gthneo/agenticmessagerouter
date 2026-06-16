@@ -409,6 +409,37 @@ def mark_outbox(conn, outbox_id, status, error=""):
     conn.commit()
 
 
+# ----- suggestions (AI reply-draft candidates) ------------------------------
+
+def add_suggestions(conn, conversation_id, items):
+    now = _now()
+    for it in items:
+        conn.execute(
+            """INSERT INTO suggestions (conversation_id, version_idx, stance, body,
+                                        llm_provider, llm_model, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'suggested', ?)""",
+            (conversation_id, it.get("version_idx", 0), it.get("stance", ""),
+             it.get("body", ""), it.get("llm_provider", ""), it.get("llm_model", ""), now))
+    conn.commit()
+
+
+def get_suggestions(conn, conversation_id, status="suggested"):
+    rows = conn.execute(
+        "SELECT * FROM suggestions WHERE conversation_id=? AND status=? ORDER BY version_idx",
+        (conversation_id, status)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_suggestion_status(conn, suggestion_id, status):
+    conn.execute("UPDATE suggestions SET status=? WHERE id=?", (status, suggestion_id))
+    conn.commit()
+
+
+def clear_suggestions(conn, conversation_id):
+    conn.execute("DELETE FROM suggestions WHERE conversation_id=?", (conversation_id,))
+    conn.commit()
+
+
 # ----- reset (destructive; HITL-gated at the CLI layer) ---------------------
 
 def reset_store(conn, *, dry_run=True, platform=None, include_accounts=False):

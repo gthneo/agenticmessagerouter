@@ -110,6 +110,20 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status, created_at);
 
+-- AI reply-draft candidates (separate from outbox; outbox = human-committed only)
+CREATE TABLE IF NOT EXISTS suggestions (
+    id              INTEGER PRIMARY KEY,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    version_idx     INTEGER NOT NULL DEFAULT 0,
+    stance          TEXT NOT NULL DEFAULT '',
+    body            TEXT NOT NULL DEFAULT '',
+    llm_provider    TEXT NOT NULL DEFAULT '',
+    llm_model       TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'suggested',  -- suggested|used|dismissed
+    created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_suggestions_conv ON suggestions(conversation_id, status);
+
 -- full-text search (trigram = CJK substring; NOTE: only matches queries >= 3 chars,
 -- so the search layer uses a LIKE fallback for shorter queries)
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
