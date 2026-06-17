@@ -165,6 +165,11 @@ def api_add_self(conn, payload):
     return {"ok": True}
 
 
+def api_set_self_persona(conn, payload):
+    db.set_self_persona(conn, payload["kind"], payload["identifier"], payload["persona"])
+    return {"ok": True}
+
+
 def api_remove_self(conn, payload):
     db.remove_self_identity(conn, payload["kind"], payload["identifier"])
     db.log_event(conn, kind="self_remove", actor=payload.get("actor", "user"),
@@ -338,7 +343,7 @@ def make_handler(db_path):
                               "/api/outbox/confirm", "/api/outbox/cancel",
                               "/api/suggestions/dismiss", "/api/draft-assist",
                               "/api/matters", "/api/matters/status", "/api/diagnose",
-                              "/api/self", "/api/self/remove", "/api/self/person",
+                              "/api/self", "/api/self/remove", "/api/self/person", "/api/self/persona",
                               "/api/reunify", "/api/watch", "/api/connect", "/api/unlink"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
@@ -372,6 +377,8 @@ def make_handler(db_path):
                     return self._send(200, api_remove_self(conn, payload))
                 if u.path == "/api/self/person":
                     return self._send(200, api_mark_person_self(conn, payload))
+                if u.path == "/api/self/persona":
+                    return self._send(200, api_set_self_persona(conn, payload))
                 if u.path == "/api/reunify":
                     return self._send(200, api_reunify(conn, payload))
                 if u.path == "/api/watch":
@@ -549,14 +556,16 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
   <br><span style=color:#888>已有：${chs}</span></div>
   <button onclick="confirmLink(${c.conversation_id},'${esc(p.id)}')">确认归并到 ${esc(p.name||p.id)}</button>`}).join('')}
  </div>`).join('')||'<div class=p style=padding:8px>(无待确认项)</div>'}
-const PERSONAS=['自我','AI分身','经营'];
+const PERSONAS=['工作','生活','学习'];
+function personaSel(kind,id,cur){const o=PERSONAS.map(p=>`<option${p===cur?' selected':''}>${p}</option>`).join('');
+ return `<select onchange="setPersona('${esc(kind)}','${esc(id)}',this.value)">${o}</select>`}
 function toggleSettings(){const s=document.getElementById('settings');
  if(s.classList.contains('hide')){s.classList.remove('hide');loadSettings()}else{s.classList.add('hide')}}
 async function loadSettings(){
  const d=await E('/self');
  document.getElementById('self_reg').innerHTML=(d.registered||[]).map(s=>
   `<div class=row><b>${esc(s.kind)}</b> <span class=id>${esc(s.identifier)}</span>
-   <span class=tag>· ${esc(s.persona)}${s.label?' · '+esc(s.label):''}</span>
+   ${personaSel(s.kind,s.identifier,s.persona)}<span class=tag>${s.label?' · '+esc(s.label):''}</span>
    <button class=x onclick="removeSelf('${esc(s.kind)}','${esc(s.identifier)}')">✕</button></div>`
   ).join('')||'<div class=tag style=padding:6px>(还没登记自我身份)</div>';
  document.getElementById('self_sug').innerHTML=(d.suggestions||[]).map(s=>{
@@ -578,6 +587,7 @@ async function markSelf(pid,name){if(!confirm('把「'+name+'」标为你自己?
  await P('/self/person',{person_id:pid});toast('已设为自我 🪞');loadSettings()}
 async function addSelf(kind,identifier,btn){const persona=btn.parentNode.querySelector('select').value;
  await P('/self',{kind,identifier,persona});toast('已纳入「我的」');loadSettings()}
+async function setPersona(kind,identifier,persona){await P('/self/persona',{kind,identifier,persona});toast('persona 已改: '+persona)}
 async function removeSelf(kind,identifier){await P('/self/remove',{kind,identifier});loadSettings()}
 async function runReunify(reset){
  if(reset&&!confirm('复位会清掉自动归并(保留人工确认的),确定?'))return;

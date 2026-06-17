@@ -220,25 +220,24 @@ def test_record_tokens_accumulates_usage(conn):
     assert total["tokens_out"] == 40
 
 
-def test_unify_by_wxid_merges_same_wxid_across_accounts(conn):
-    from jl import ingest
+def test_unify_by_wxid_merges_existing_no_autocreate(conn):
     db.upsert_account(conn, account_id=1, platform="wechat", self_id="wxid_me", tool="fullwechat")
     db.upsert_account(conn, account_id=5, platform="wechat", self_id="wxid_oki8", tool="powerdata")
-    db.add_self_identity(conn, "wechat", "wxid_me")
     db.add_self_identity(conn, "wechat", "wxid_oki8")
-    # same contact (wxid_shir) reachable from BOTH accounts → must merge to ONE person
-    a = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_shir", name="Shirley")
+    # an EXISTING person on account1; the SAME wxid appears on account5 → merge to it
+    db.upsert_person(conn, id="lisi", name="李四", category="biz", threshold_days=7, aliases=[])
+    a = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_shir", name="李四")
+    db.link_person(conn, a, "lisi")
     b = db.upsert_conversation(conn, account_id=5, platform="wechat", chat_id="wxid_shir", name="养虾人")
-    # a self chat must be skipped
+    # an UNLINKED wxid (e.g. a 公众号) must NOT be auto-personified
+    pub = db.upsert_conversation(conn, account_id=5, platform="wechat", chat_id="wxid_pub", name="某公众号")
+    # a self chat skipped
     sc = db.upsert_conversation(conn, account_id=5, platform="wechat", chat_id="wxid_oki8", name="自己")
-    # a different contact stays separate
-    d = db.upsert_conversation(conn, account_id=1, platform="wechat", chat_id="wxid_other", name="李四")
     out = db.unify_by_wxid(conn)
-    pa = db.get_conversation(conn, a)["person_id"]
-    pb = db.get_conversation(conn, b)["person_id"]
-    assert pa and pa == pb                                  # both Shirley convs → one person
-    assert db.get_conversation(conn, sc)["person_id"] is None   # self chat skipped
-    assert db.get_conversation(conn, d)["person_id"] != pa      # different wxid not merged
+    assert db.get_conversation(conn, b)["person_id"] == "lisi"      # merged to existing person
+    assert db.get_conversation(conn, pub)["person_id"] is None      # NO auto-create (HITL later)
+    assert db.get_conversation(conn, sc)["person_id"] is None       # self skipped
+    assert out["linked"] == 1
 
 
 def test_merge_persons_combines_two_wxids(conn):
