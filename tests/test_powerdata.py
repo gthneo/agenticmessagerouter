@@ -168,6 +168,23 @@ def test_pull_new_pairs_conv_with_messages(monkeypatch):
     assert len(msgs) == 3 and msgs[0].content == "[链接] 标题"
 
 
+def test_call_never_sends_account_arg(monkeypatch):
+    # PowerData's MCP tools take NO `account` param — account is selected by which
+    # PowerData server/URL the adapter points at, not per call. Lock that we never
+    # forward an `account` kwarg over the wire even though the ABC method takes one.
+    a = pd.PowerDataAdapter(token="x")
+    seen = []
+
+    def fake_call(name, **kw):
+        seen.append((name, kw))
+        return SESSIONS_SAMPLE if name == "get_recent_sessions" else HISTORY_SAMPLE
+
+    monkeypatch.setattr(a, "_call", fake_call)
+    a.pull_new("wxid_test_0001")   # caller passes an account; it must not reach _call
+    assert seen, "expected _call invocations"
+    assert all("account" not in kw for _, kw in seen)
+
+
 def test_parse_sessions_handles_missing_unread_and_group():
     from jl.channels import powerdata
     txt = ("最近 3 个会话:\n\n"

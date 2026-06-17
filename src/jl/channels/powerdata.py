@@ -255,12 +255,17 @@ class PowerDataAdapter(ingest.IngestAdapter):
         return env["result"]["content"][0]["text"]
 
     # ---- IngestAdapter contract --------------------------------------------
+    # NOTE on `account`: PowerData's MCP tools take NO `account` argument — a single MCP
+    # server serves exactly the one WeChat account its config (db_dir/keys) points at.
+    # 一机多号 (multi-open) is a SERVER-side config concern: to read a different account
+    # you point a different PowerData URL at it. So AMR distinguishes accounts by URL
+    # (one adapter instance per account), and the `account` ABC param is carried only for
+    # contract symmetry — it is NOT sent over the wire.
     def resolve_wxid(self, account, name):
         """Contact NAME → its wxid (stable cross-account id) via get_contacts; falls back
         to the name if unresolved. Enables cross-tool/account person unification."""
         try:
-            return parse_contact_wxid(
-                self._call("get_contacts", account=account, query=name)) or name
+            return parse_contact_wxid(self._call("get_contacts", query=name)) or name
         except Exception:
             return name
 
@@ -268,7 +273,7 @@ class PowerDataAdapter(ingest.IngestAdapter):
         """chat_id = the contact's wxid (resolved via get_contacts) so it aligns with
         other wechat tools for cross-account归一; `name` keeps the display label (and is
         what PowerData addresses history by). Set resolve_wxid=False to skip the lookups."""
-        text = self._call("get_recent_sessions", account=account, limit=50)
+        text = self._call("get_recent_sessions", limit=50)
         out = []
         for s in parse_sessions(text):
             wxid = (self.resolve_wxid(account, s["name"])
@@ -286,8 +291,7 @@ class PowerDataAdapter(ingest.IngestAdapter):
         queried by NAME (PowerData addresses by name), while chat_id carries the wxid."""
         out = []
         for conv in self.list_conversations(account):
-            text = self._call("get_chat_history", account=account,
-                              chat_name=conv.name, limit=recent_limit)
+            text = self._call("get_chat_history", chat_name=conv.name, limit=recent_limit)
             out.append((conv, parse_history(text)))
         return out
 
