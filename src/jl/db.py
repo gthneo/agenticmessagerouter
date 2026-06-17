@@ -215,8 +215,20 @@ def set_muted(conn, conversation_id, muted):
     conn.commit()
 
 
+# PowerData/multi-open appends a device-session suffix to the account's wxid in its
+# account-key (`wxid_<base>_<4-8 alnum>`), but contacts/conversations use the BASE wxid.
+# Strip the suffix so self_id and peer ids match (the base wxid is the immutable anchor;
+# 微信号 changes, so it's never the key). Real wxids have no internal '_' after `wxid_`.
+_WXID_SUFFIX = re.compile(r"^(wxid_[0-9a-zA-Z]+)_[0-9a-zA-Z]{1,12}$")
+
+
 def _canon_identifier(kind, identifier):
-    """Canonical comparable id for an endpoint (phone → canon_phone; else as-is)."""
+    """Canonical comparable id for an endpoint (phone → canon_phone; wechat → strip the
+    PowerData device suffix off a wxid; else as-is)."""
+    if kind == "wechat" and identifier:
+        m = _WXID_SUFFIX.match(identifier)
+        if m:
+            return m.group(1)
     if kind == "phone":
         from .channels.phone import canon_phone
         return canon_phone(identifier)

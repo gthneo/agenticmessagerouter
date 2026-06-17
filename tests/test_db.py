@@ -267,3 +267,17 @@ def test_logs_layered_query(conn):
     warn_plus = db.get_logs(conn, level="WARN")        # WARN + ERROR only
     assert {r["level"] for r in warn_plus} == {"WARN", "ERROR"}
     assert db.get_logs(conn, level="INFO")             # INFO+ includes the self read
+
+
+def test_canon_strips_wxid_device_suffix(conn):
+    # PowerData account-key suffix stripped → matches base wxid used in contacts
+    assert db._canon_identifier("wechat", "wxid_test12345_d898") == "wxid_test12345"
+    assert db._canon_identifier("wechat", "wxid_test12345_e96b") == "wxid_test12345"
+    assert db._canon_identifier("wechat", "wxid_test12345") == "wxid_test12345"   # base unchanged
+    # non-wxid wechat ids untouched (custom id / 微信号 / gh_)
+    assert db._canon_identifier("wechat", "adambb_joy") == "adambb_joy"
+    assert db._canon_identifier("wechat", "gh_abc123") == "gh_abc123"
+    # is_self matches the base form even if registered suffixed
+    db.add_self_identity(conn, "wechat", "wxid_me0001_e96b")
+    assert db.is_self(conn, "wechat", "wxid_me0001")          # base form (as seen in a contact)
+    assert db.is_self(conn, "wechat", "wxid_me0001_d898")     # another instance's suffix
