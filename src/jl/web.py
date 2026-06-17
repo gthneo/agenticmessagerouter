@@ -144,6 +144,14 @@ def api_proactive(conn):
     return out
 
 
+def api_logs(conn, params):
+    """分层运维日志 for 运维Agent/工程师: filter by ?level=WARN&component=llm&limit=."""
+    cid = params.get("limit")
+    return db.get_logs(conn, level=params.get("level") or None,
+                       component=params.get("component") or None,
+                       limit=int(cid) if cid else 200)
+
+
 def api_dismiss_suggestion(conn, payload):
     db.set_suggestion_status(conn, int(payload["id"]), "dismissed")
     return {"ok": True}
@@ -332,6 +340,8 @@ def make_handler(db_path):
                     return self._send(200, api_proactive(conn))
                 if u.path == "/api/self-profile":
                     return self._send(200, api_get_self_profile(conn))
+                if u.path == "/api/logs":
+                    return self._send(200, api_logs(conn, params))
                 if u.path == "/api/self":
                     return self._send(200, api_self(conn))
                 if u.path == "/api/matters":
@@ -473,7 +483,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
   <div style="display:flex;justify-content:space-between;align-items:center">
    <b>⚙ 设置</b><button class=go onclick="toggleSettings()">✕ 关闭设置</button></div>
   <h2>🪞 自我身份</h2><div id=self_reg></div>
-  <div class=sec style="margin-top:6px">建议（勾选纳入「我的」）</div><div id=self_sug></div>
+  <div class=sec style="margin-top:6px">🔎 疑似你自己的号（点「这是我」才纳入；不理会也行）</div><div id=self_sug></div>
   <h2>🧬 我是谁（用于 LLM·随时可改）</h2>
   <div class=row><textarea id=selfprofile rows=5 style="width:100%;border:1px solid #ccc;border-radius:6px;padding:6px" placeholder="班迪这个自然人：性格 / 灵魂 / 喜好 / 工作中的特征 / 核心词……（喂给 AI 起草/诊断，体现你的人味）"></textarea></div>
   <div class=row><button class=go onclick="saveProfile()">💾 保存「我是谁」</button></div>
@@ -593,7 +603,7 @@ async function loadSettings(){
   return `<div class=row><b>${esc(s.kind)}</b> <span class=id>${esc(s.identifier)}</span>
    <span class=tag>${esc(s.name||'')}${s.reason?' · '+esc(s.reason):''}</span>
    <select>${opts}</select>
-   <button class=go onclick="addSelf('${esc(s.kind)}','${esc(s.identifier)}',this)">＋设为自我</button></div>`
+   <button class=go onclick="addSelf('${esc(s.kind)}','${esc(s.identifier)}',this)">✅ 这是我，纳入</button></div>`
   }).join('')||'<div class=tag style=padding:6px>(暂无建议)</div>';
  const ps=await E('/persons');
  document.getElementById('people').innerHTML=(ps||[]).map(p=>

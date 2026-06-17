@@ -85,6 +85,9 @@ def route(args):
                             "chat_id": rest[1] if len(rest) > 1 else None})
     if a in ("电话归一", "dedup-phone"):
         return ("dedup_phone", {})
+    if a in ("logs", "日志"):
+        return ("logs", {"level": _opt_value(args, "--level"),
+                         "component": _opt_value(args, "--component")})
     if a in ("解绑", "unlink"):
         cid = args[1] if len(args) > 1 and not args[1].startswith("--") else None
         return ("unlink", {"conversation_id": int(cid) if cid else None})
@@ -312,6 +315,15 @@ def cmd_unlink(conn, ctx):
         print(f"会话 {cid} 本就未归人，无需拆。")
 
 
+def cmd_logs(conn, ctx):
+    rows = db.get_logs(conn, level=ctx.get("level"), component=ctx.get("component"), limit=50)
+    print(f"\n📋 运维日志 (level>={ctx.get('level') or 'ALL'} component={ctx.get('component') or '*'}):")
+    for r in rows:
+        print(f"  [{time.strftime('%m-%d %H:%M', time.localtime(r['ts']))}] {r['level']:<5} {r['component']:<10} {r['msg']}")
+    if not rows:
+        print("  (无日志)")
+
+
 def cmd_dedup_phone(conn, ctx):
     n = db.dedup_phone_conversations(conn)
     db.log_event(conn, kind="dedup_phone", actor=_actor(), detail={"folded": n})
@@ -463,6 +475,8 @@ def main(argv=None):
         ctx.update(params); cmd_connect(conn, ctx)
     elif command == "dedup_phone":
         cmd_dedup_phone(conn, ctx)
+    elif command == "logs":
+        ctx.update(params); cmd_logs(conn, ctx)
     elif command == "unlink":
         ctx.update(params); cmd_unlink(conn, ctx)
     else:

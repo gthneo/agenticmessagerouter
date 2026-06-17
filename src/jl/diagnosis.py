@@ -53,7 +53,7 @@ def build_diagnosis_context(conn, conversation_id, recent=12, rubric=None):
     rb = load_rubric() if rubric is None else rubric
     from . import assist
     sys = (DIAGNOSIS_GUIDE + (("\n\n打法库/rubric:\n" + rb) if rb else "")
-           + assist._self_profile_block())   # 我是谁: diagnose in light of who the user is
+           + assist._self_profile_block(conn))   # 我是谁(+读取日志)
     user = "最近对话:\n" + "\n".join(lines) + "\n\n请输出诊断 JSON。"
     return [{"role": "system", "content": sys}, {"role": "user", "content": user}]
 

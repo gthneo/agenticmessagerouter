@@ -255,3 +255,15 @@ def test_merge_persons_combines_two_wxids(conn):
     chans = {(c["kind"], c["identifier"]) for c in db.get_channels(conn, "p_keep")}
     assert ("wechat", "wxid_test_bbb") in chans and ("wechat", "wxid_test_aaa") in chans  # both wxids on one person
     assert db.get_conversation(conn, cv)["person_id"] == "p_keep"      # conv moved
+
+
+def test_logs_layered_query(conn):
+    db.log(conn, "INFO", "self", "我是谁 被读取", {"chars": 10})
+    db.log(conn, "WARN", "send", "目标不在近期会话")
+    db.log(conn, "ERROR", "llm", "provider down")
+    db.log(conn, "DEBUG", "ingest", "pulled 5")
+    assert len(db.get_logs(conn)) == 4
+    assert [r["component"] for r in db.get_logs(conn, component="send")] == ["send"]
+    warn_plus = db.get_logs(conn, level="WARN")        # WARN + ERROR only
+    assert {r["level"] for r in warn_plus} == {"WARN", "ERROR"}
+    assert db.get_logs(conn, level="INFO")             # INFO+ includes the self read

@@ -164,6 +164,19 @@ CREATE TABLE IF NOT EXISTS commitments (
 );
 CREATE INDEX IF NOT EXISTS idx_commitments_matter ON commitments(matter_id);
 
+-- 分层运维日志 (for 运维工程师 + 运维Agent): level (DEBUG<INFO<WARN<ERROR) × component.
+-- Distinct from `events` (HITL audit trail) — this is operational/diagnostic logging.
+CREATE TABLE IF NOT EXISTS logs (
+    id        INTEGER PRIMARY KEY,
+    ts        INTEGER NOT NULL,
+    level     TEXT NOT NULL DEFAULT 'INFO',   -- DEBUG/INFO/WARN/ERROR
+    component TEXT NOT NULL DEFAULT '',        -- ingest/route/llm/send/self/归一/diagnose/web...
+    msg       TEXT NOT NULL DEFAULT '',
+    detail    TEXT NOT NULL DEFAULT '{}'       -- JSON
+);
+CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_comp ON logs(component, ts DESC);
+
 -- SELF(自我): the user's OWN identities across channels (中心节点, NOT a contact).
 -- Multi-channel × multi-identity, flat, each tagged with a persona 面具.
 CREATE TABLE IF NOT EXISTS self_identities (

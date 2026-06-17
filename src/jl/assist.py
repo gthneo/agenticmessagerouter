@@ -68,9 +68,16 @@ def save_self_profile(text):
         f.write(text or "")
 
 
-def _self_profile_block():
+def _self_profile_block(conn=None):
     p = load_self_profile()
-    return (SELF_PROFILE_GUIDE + p) if p else ""
+    if not p:
+        return ""
+    if conn is not None:   # 运维日志: record each time 我是谁 is read into an LLM context
+        try:
+            db.log(conn, "INFO", "self", "我是谁 被读取(注入LLM)", {"chars": len(p)})
+        except Exception:
+            pass
+    return SELF_PROFILE_GUIDE + p
 
 
 def _playbook_path():
@@ -106,7 +113,7 @@ def build_context(conn, conversation_id, recent=12, playbook=None, guidance=""):
         sys = sys + PLAYBOOK_GUIDANCE + pb
     if guidance:   # T4 诊断口径 drives the draft (沟通教练 → 起草)
         sys = sys + "\n\n本次诊断口径(据此起草,务必落实):" + guidance
-    sys = sys + _self_profile_block()                 # 我是谁: the user's natural-person profile
+    sys = sys + _self_profile_block(conn)             # 我是谁(+读取日志)
     sys = sys + _voice_block(conn, conversation_id)   # 口吻沉淀: write like me
     user = (f"对话对象: {pname}" + (f"(类别 {pcat})" if pcat else "") + "\n\n"
             "最近对话:\n" + "\n".join(lines) + "\n\n请起草回复。")
@@ -231,7 +238,7 @@ def build_opener_context(conn, person_id, recent=12, playbook=None):
     pb = load_playbook() if playbook is None else playbook
     if pb:
         sys = sys + PLAYBOOK_GUIDANCE + pb
-    sys = sys + _self_profile_block()                # 我是谁
+    sys = sys + _self_profile_block(conn)             # 我是谁(+读取日志)
     if conv:
         sys = sys + _voice_block(conn, conv["id"])   # 口吻沉淀: opener in my voice too
     gap = (f"距上次互动约 {days:.0f} 天。" if days is not None else "")

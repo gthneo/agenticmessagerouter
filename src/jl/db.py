@@ -983,6 +983,40 @@ def derive_last_interactions(conn, person_id):
     return out
 
 
+# ----- 分层运维日志 (ops engineer + ops Agent) ------------------------------
+
+LOG_LEVELS = {"DEBUG": 10, "INFO": 20, "WARN": 30, "ERROR": 40}
+
+
+def log(conn, level, component, msg, detail=None):
+    """Append a layered operational log line (level × component). For 运维Agent/工程师 to
+    consume via get_logs / jl logs / /api/logs. Never raises on a bad level (coerces INFO)."""
+    level = level if level in LOG_LEVELS else "INFO"
+    conn.execute(
+        "INSERT INTO logs (ts, level, component, msg, detail) VALUES (?, ?, ?, ?, ?)",
+        (_now(), level, component, msg, json.dumps(detail or {}, ensure_ascii=False)))
+    conn.commit()
+
+
+def get_logs(conn, *, level=None, component=None, limit=200):
+    """Query ops logs. `level` = minimum level (e.g. WARN → WARN+ERROR). Newest first."""
+    rows = conn.execute("SELECT * FROM logs ORDER BY ts DESC, id DESC LIMIT ?",
+                        (max(limit * 4, limit),)).fetchall()
+    floor = LOG_LEVELS.get(level, 0)
+    out = []
+    for r in rows:
+        if component and r["component"] != component:
+            continue
+        if LOG_LEVELS.get(r["level"], 20) < floor:
+            continue
+        d = dict(r)
+        d["detail"] = json.loads(d.get("detail") or "{}")
+        out.append(d)
+        if len(out) >= limit:
+            break
+    return out
+
+
 # ----- events (audit trail) -------------------------------------------------
 
 def log_event(conn, *, kind, person_id=None, actor="", detail=None):
