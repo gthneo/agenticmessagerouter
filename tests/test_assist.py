@@ -251,3 +251,26 @@ def test_auto_draft_sweep_scopes_to_awaiting_private_linked():
     fake = lambda messages, **kw: llm.LLMResult(text="1) 稳妥: R", ok=True, model="f", provider="f")
     touched = assist.auto_draft_sweep(conn, llm_complete=fake)
     assert touched == [a]
+
+
+def test_self_profile_injected_into_drafts(tmp_path, monkeypatch):
+    p = tmp_path / "self_profile.md"
+    p.write_text("班迪：直爽、重义气、爱算力与液冷；做事给确定。", encoding="utf-8")
+    monkeypatch.setenv("AMR_SELF_PROFILE", str(p))
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    msgs = assist.build_context(conn, cid, playbook="")
+    sysmsg = next(m["content"] for m in msgs if m["role"] == "system")
+    assert "我是谁" in sysmsg and "重义气" in sysmsg          # natural-person profile reaches the prompt
+
+
+def test_self_profile_absent_no_block(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMR_SELF_PROFILE", str(tmp_path / "nope.md"))
+    conn = db.connect(":memory:"); db.init_db(conn); cid = _seed(conn)
+    sysmsg = next(m["content"] for m in assist.build_context(conn, cid, playbook="") if m["role"] == "system")
+    assert "我是谁" not in sysmsg                              # no profile → no block (degrade)
+
+
+def test_save_then_load_self_profile(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMR_SELF_PROFILE", str(tmp_path / "sp.md"))
+    assist.save_self_profile("性格核心词")
+    assert assist.load_self_profile() == "性格核心词"

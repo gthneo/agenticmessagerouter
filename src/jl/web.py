@@ -170,6 +170,18 @@ def api_set_self_persona(conn, payload):
     return {"ok": True}
 
 
+def api_get_self_profile(conn):
+    from . import assist
+    return {"profile": assist.load_self_profile()}
+
+
+def api_set_self_profile(conn, payload):
+    from . import assist
+    assist.save_self_profile(payload.get("profile", ""))
+    db.log_event(conn, kind="self_profile", actor=payload.get("actor", "user"), detail={})
+    return {"ok": True}
+
+
 def api_remove_self(conn, payload):
     db.remove_self_identity(conn, payload["kind"], payload["identifier"])
     db.log_event(conn, kind="self_remove", actor=payload.get("actor", "user"),
@@ -318,6 +330,8 @@ def make_handler(db_path):
                     return self._send(200, api_merge_candidates(conn))
                 if u.path == "/api/proactive":
                     return self._send(200, api_proactive(conn))
+                if u.path == "/api/self-profile":
+                    return self._send(200, api_get_self_profile(conn))
                 if u.path == "/api/self":
                     return self._send(200, api_self(conn))
                 if u.path == "/api/matters":
@@ -343,7 +357,7 @@ def make_handler(db_path):
                               "/api/outbox/confirm", "/api/outbox/cancel",
                               "/api/suggestions/dismiss", "/api/draft-assist",
                               "/api/matters", "/api/matters/status", "/api/diagnose",
-                              "/api/self", "/api/self/remove", "/api/self/person", "/api/self/persona",
+                              "/api/self", "/api/self/remove", "/api/self/person", "/api/self/persona", "/api/self-profile",
                               "/api/reunify", "/api/watch", "/api/connect", "/api/unlink"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
@@ -379,6 +393,8 @@ def make_handler(db_path):
                     return self._send(200, api_mark_person_self(conn, payload))
                 if u.path == "/api/self/persona":
                     return self._send(200, api_set_self_persona(conn, payload))
+                if u.path == "/api/self-profile":
+                    return self._send(200, api_set_self_profile(conn, payload))
                 if u.path == "/api/reunify":
                     return self._send(200, api_reunify(conn, payload))
                 if u.path == "/api/watch":
@@ -458,6 +474,9 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
    <b>⚙ 设置</b><button class=go onclick="toggleSettings()">✕ 关闭设置</button></div>
   <h2>🪞 自我身份</h2><div id=self_reg></div>
   <div class=sec style="margin-top:6px">建议（勾选纳入「我的」）</div><div id=self_sug></div>
+  <h2>🧬 我是谁（用于 LLM·随时可改）</h2>
+  <div class=row><textarea id=selfprofile rows=5 style="width:100%;border:1px solid #ccc;border-radius:6px;padding:6px" placeholder="班迪这个自然人：性格 / 灵魂 / 喜好 / 工作中的特征 / 核心词……（喂给 AI 起草/诊断，体现你的人味）"></textarea></div>
+  <div class=row><button class=go onclick="saveProfile()">💾 保存「我是谁」</button></div>
   <h2>🔄 归一</h2>
   <div class=row><button class=go onclick="runReunify(false)">🔄 启动归一</button>
    <button class=danger onclick="runReunify(true)">♻️ 复位归一</button><span id=reuniout></span></div>
@@ -562,6 +581,7 @@ function personaSel(kind,id,cur){const o=PERSONAS.map(p=>`<option${p===cur?' sel
 function toggleSettings(){const s=document.getElementById('settings');
  if(s.classList.contains('hide')){s.classList.remove('hide');loadSettings()}else{s.classList.add('hide')}}
 async function loadSettings(){
+ const prof=await E('/self-profile');document.getElementById('selfprofile').value=(prof&&prof.profile)||'';
  const d=await E('/self');
  document.getElementById('self_reg').innerHTML=(d.registered||[]).map(s=>
   `<div class=row><b>${esc(s.kind)}</b> <span class=id>${esc(s.identifier)}</span>
@@ -588,6 +608,7 @@ async function markSelf(pid,name){if(!confirm('把「'+name+'」标为你自己?
 async function addSelf(kind,identifier,btn){const persona=btn.parentNode.querySelector('select').value;
  await P('/self',{kind,identifier,persona});toast('已纳入「我的」');loadSettings()}
 async function setPersona(kind,identifier,persona){await P('/self/persona',{kind,identifier,persona});toast('persona 已改: '+persona)}
+async function saveProfile(){await P('/self-profile',{profile:document.getElementById('selfprofile').value});toast('「我是谁」已保存 🧬')}
 async function removeSelf(kind,identifier){await P('/self/remove',{kind,identifier});loadSettings()}
 async function runReunify(reset){
  if(reset&&!confirm('复位会清掉自动归并(保留人工确认的),确定?'))return;
