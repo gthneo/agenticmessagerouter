@@ -62,6 +62,7 @@ def api_ingest(conn, payload):
                                    platform=acct["platform"], conv=conv, msgs=msgs)
         n_conv += 1
         n_msg += ins
+    db.apply_self_directions(conn)  # 自我发出消息标 direction=out (右绿气泡)
     return {"accounts": 1, "conversations": n_conv, "messages": n_msg}
 
 
@@ -536,7 +537,7 @@ const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boo
 const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetch('/api'+s+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())};
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function fmt(ts){return ts?new Date(ts*1000).toLocaleString('zh-CN'):''}
-window.NAMES={};
+window.NAMES={};window.SCROLLPOS={};
 function renderBubbles(m,opt){opt=opt||{};let out='',last=0;
  (m||[]).forEach(x=>{
   if(x.ts&&last&&x.ts-last>300){out+='<div class=tsep>'+fmt(x.ts)+'</div>';}
@@ -583,11 +584,13 @@ async function doSend(){if(window.SENDTIMER){clearInterval(window.SENDTIMER);win
   c.querySelectorAll('button').forEach(b=>{b.disabled=true;});
   const row=await P('/outbox',{conversation_id:window.CURCONV,body});
   const r=await P('/outbox/confirm',{id:row.id});
-  if(r.ok){ta.value='';cancelSend();toast('已发送 ✅');loadOutbox();openConv(window.CURCONV);}
+  if(r.ok){ta.value='';cancelSend();toast('已发送 ✅');loadOutbox();
+    const ms=document.getElementById('msgs');ms.insertAdjacentHTML('beforeend','<div class="m out"><div class=bub>'+esc(body)+'</div><span class=t>刚刚</span></div>');ms.scrollTop=ms.scrollHeight;}
   else{c.className='err';c.innerHTML='<span class=txt>发送失败：'+esc(r.error||'未知')+'</span>'+
     ' <button class=go onclick="armSend()">重试</button> <button onclick="cancelSend()">取消</button>';}}
 async function openConv(id){window.CURCONV=id;cancelSend();document.body.classList.add('m-chat');const m=await E('/conversations/'+id+'/messages');
- document.getElementById('msgs').innerHTML=renderBubbles(m);
+ const ms=document.getElementById('msgs');ms.innerHTML=renderBubbles(m);
+ const sp=window.SCROLLPOS[id];ms.scrollTop=sp!=null?sp:ms.scrollHeight;  // 上次离开的位置，没有则到最新
  loadSuggestions(id);loadMatters(id)}
 async function loadMatters(id){const ms=await E('/matters','conversation='+id);
  document.getElementById('matters').innerHTML=ms.map(m=>{
@@ -704,5 +707,6 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
  const h=await E('/search','q='+encodeURIComponent(e.target.value));
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
+document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
 loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()
 </script></body></html>"""

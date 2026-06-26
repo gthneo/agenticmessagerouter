@@ -251,6 +251,7 @@ def cmd_poll(conn, ctx):
     print(f"🔁 poll 每 {interval}s 拉新 (Ctrl-C 停)")
     while True:
         n = ingest_run.ignite(conn, FullWechatAdapter(), account_id=aid, actor="poll")
+        db.apply_self_directions(conn)  # 回灌的自我发出消息标 direction=out (右绿气泡)
         print(f"  [{_t.strftime('%H:%M:%S')}] +{n}")
         _t.sleep(interval)
 
