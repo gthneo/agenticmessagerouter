@@ -47,6 +47,26 @@ PowerData 的**配置层**已支持「一机多号」(微信多开)：`config.js
 让消费方（AMR / OpenClaw bridge）把推来的消息路由到正确的账号。
 （与 SCHEMA_VERSION 对齐；保持 customer-bridge 兼容。）
 
+### 5. `get_chat_history` 展开 app 消息（type 49），不要塌成「[链接/文件]」
+**现状问题**：`get_chat_history` 的文本导出把 app 消息（微信 type 49：链接卡 / 文件 /
+引用回复 / 小程序）统一塌成占位符 `[链接/文件]`，**真内容丢失**——消费方既存不下、
+也无从恢复（无结构化 raw）。AMR 实测：account 4(mwin) 有 48 条会话/feed 消息因此只剩占位符。
+
+**对比**：fullwechat 后端对同类 type-49 已给出可读文本（引用回复原文 / 文件名 /
+`[Link] 标题\n<url>`），AMR 直接可用。PowerData 这一层是短板。
+
+**期望**：`get_chat_history`（及 `get_recent_sessions` 预览、`get_new_messages`）对 app 消息
+至少给出**可读摘要**，按子类型：
+- **链接卡**：`标题` + `url`（如 `[链接] <title>\n<url>`）。
+- **文件**：`文件名`（如 `[文件] 季度报表.pdf`）。
+- **引用回复**：回复正文（可附 `↩ 引用:<被引摘要>`）。
+- **小程序/卡片**：`卡片标题`。
+
+**更优（可选）**：在结构化输出里附 `app_type` / `title` / `url` / `filename` 字段，
+让消费方既能展示又能入库检索（与「Structured Output」AI-Native 套路一致）。
+
+**向后兼容**：纯文本消费方仍能读到一行可读文本；无法解析的 app 消息再退回 `[链接/文件]`。
+
 ## 兼容性
 
 全部可选：单账号用户、现有 stdio / SSE 客户端零改动；`account` 省略即旧行为。

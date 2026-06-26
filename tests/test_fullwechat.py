@@ -36,6 +36,16 @@ def test_clean_content_app_msg_extracts_title_else_placeholder():
     assert fw.clean_content(49, "<msg><appmsg></appmsg></msg>") == "[链接/文件]"
 
 
+def test_clean_content_app_msg_keeps_backend_readable_text():
+    # the backend pre-cleans most type-49 into readable text — keep it, don't drop
+    # to a placeholder (regression: Connie's 引用回复 showed up as "[链接/文件]").
+    assert fw.clean_content(49, "有的有的hhhh") == "有的有的hhhh"          # quote-reply text
+    assert fw.clean_content(49, "8U机箱生产图纸01.rar") == "8U机箱生产图纸01.rar"  # filename
+    link = "[Link] 冯小刚彻底翻车\n工业时代渠道为王\nhttps://mp.weixin.qq.com/s?x=1"
+    assert fw.clean_content(49, link) == link                              # link card text+url
+    assert fw.clean_content(49, "") == "[链接/文件]"                        # empty → placeholder
+
+
 def test_clean_content_strips_leaked_xml_even_if_typed_text():
     # defensive: a media blob mislabeled type=1 must not dump raw XML into the timeline
     blob = '<msg><img cdnthumburl="305f02..." cdnthumbaeskey="750b3c"/></msg>'

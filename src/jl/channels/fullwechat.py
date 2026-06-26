@@ -29,7 +29,9 @@ _TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
 
 def clean_content(msg_type, content):
     """Turn a raw message into display text. Text → itself; media → a placeholder;
-    app messages (49) → '[链接] <title>'; leaked XML in any type → a placeholder."""
+    app messages (49) → the backend's readable text (quote-reply / filename / link),
+    falling back to '[链接] <title>' only when the content is raw <appmsg> XML;
+    leaked XML in any type → a placeholder."""
     try:
         t = int(msg_type)
     except (TypeError, ValueError):
@@ -38,9 +40,15 @@ def clean_content(msg_type, content):
     if t in _TYPE_PLACEHOLDER:
         return _TYPE_PLACEHOLDER[t]
     if t == 49 or "<appmsg" in c:
-        m = _TITLE_RE.search(c)
-        title = (m.group(1).strip() if m else "")
-        return f"[链接] {title}" if title else "[链接/文件]"
+        # Raw <appmsg> XML → pull the <title>. But this backend usually pre-cleans
+        # type-49 into readable text (a quoted-reply's text, a filename, or
+        # "[Link] 标题\n<url>"); keep that verbatim instead of dropping the real
+        # content to a generic placeholder.
+        if c.lstrip().startswith("<") or "<appmsg" in c:
+            m = _TITLE_RE.search(c)
+            title = (m.group(1).strip() if m else "")
+            return f"[链接] {title}" if title else "[链接/文件]"
+        return c.strip() or "[链接/文件]"
     # defensive: a media blob mislabeled as text must not leak raw XML
     if c.lstrip().startswith("<") and ("<msg" in c or "cdnthumb" in c or "<img" in c):
         return "[图片]"
