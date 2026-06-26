@@ -444,8 +444,14 @@ INDEX_HTML = """<!doctype html><html lang=zh><head><meta charset=utf-8>
 .cand button{margin-top:4px;padding:3px 10px;border:1px solid #4a8;background:#e8f7ee;color:#176;border-radius:6px;cursor:pointer}
 .cand button:hover{background:#d4f0e0}
 #hdr{padding:8px 12px;border-bottom:1px solid #ddd;display:flex;gap:8px;align-items:center}
-#msgs{flex:1;overflow:auto;padding:12px}.m{margin:6px 0}.m .s{font-weight:600;color:#333}.m .t{color:#aaa;font-size:11px;margin-left:6px}
-.m div{overflow-wrap:anywhere;word-break:break-word}
+#msgs{flex:1;overflow:auto;padding:12px;background:#ededed}
+.m{margin:5px 0;display:flex;flex-direction:column}.m.in{align-items:flex-start}.m.out{align-items:flex-end}
+.m .s{font-size:11px;color:#999;margin:0 4px 2px}
+.bub{max-width:72%;padding:7px 10px;border-radius:8px;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap;line-height:1.4}
+.m.in .bub{background:#fff}.m.out .bub{background:#95ec69}
+.m .t{color:#aaa;font-size:11px;margin:1px 4px 0}
+.sys{text-align:center;color:#888;font-size:12px;margin:8px auto;max-width:80%}
+.tsep{text-align:center;color:#999;font-size:11px;margin:10px 0}
 input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 .ob{padding:8px 12px;border-bottom:1px solid #eee}.ob .p{color:#888;font-size:12px}.ob .b{margin:3px 0}
 .ob button{margin:4px 6px 0 0;padding:3px 10px;border-radius:6px;cursor:pointer;border:1px solid #ccc;background:#f7f7f7}
@@ -508,6 +514,18 @@ const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetc
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function fmt(ts){return ts?new Date(ts*1000).toLocaleString('zh-CN'):''}
 window.NAMES={};
+function renderBubbles(m,opt){opt=opt||{};let out='',last=0;
+ (m||[]).forEach(x=>{
+  if(x.ts&&last&&x.ts-last>300){out+='<div class=tsep>'+fmt(x.ts)+'</div>';}
+  if(x.ts)last=x.ts;
+  const sys=(x.type==='10002')||/撤回了一条消息$/.test(x.content||'');
+  if(sys){out+='<div class=sys>'+esc(x.content)+'</div>';return;}
+  const dir=x.direction==='out'?'out':'in';
+  const tag=(opt.platform&&x.platform)?' <span class=badge>'+esc(x.platform)+'</span>':'';
+  const name=dir==='in'?'<span class=s>'+esc(x.sender)+tag+'</span>':'';
+  out+='<div class="m '+dir+'">'+name+'<div class=bub>'+esc(x.content)+'</div><span class=t>'+fmt(x.ts)+'</span></div>';
+ });
+ return out||'(无消息)';}
 async function loadConvs(){const c=await E('/conversations');c.forEach(x=>window.NAMES[x.id]=x.name||x.chat_id);
  document.getElementById('list').innerHTML=
  c.map(x=>`<div class=conv onclick="openConv(${x.id})"><div class=n>${esc(x.name||x.chat_id)}</div>
@@ -527,8 +545,7 @@ async function confirmSend(){const ta=document.getElementById('reply'),body=ta.v
  if(r.ok){ta.value='';toast('已发送 ✅')}else{alert('发送失败：'+(r.error||'未知'))}
  loadOutbox()}
 async function openConv(id){window.CURCONV=id;resetSendbar();const m=await E('/conversations/'+id+'/messages');
- document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
- <span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)';
+ document.getElementById('msgs').innerHTML=renderBubbles(m);
  loadSuggestions(id);loadMatters(id)}
 async function loadMatters(id){const ms=await E('/matters','conversation='+id);
  document.getElementById('matters').innerHTML=ms.map(m=>{
@@ -570,8 +587,7 @@ async function loadPersons(){const ps=await E('/persons');document.getElementByI
  <div class=p>${p.conversations} 个会话 · ${fmt(p.last_activity_at)}</div></div>`).join('')||'<div class=p style=padding:8px>(暂无已归并联系人)</div>'}
 async function openPerson(id){const m=await E('/persons/'+encodeURIComponent(id)+'/timeline');
  document.getElementById('title').textContent='👤 '+id+' 合并时间线';
- document.getElementById('msgs').innerHTML=m.map(x=>`<div class=m><span class=s>${esc(x.sender)}</span>
- <span class=badge>${esc(x.platform)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')||'(无消息)'}
+ document.getElementById('msgs').innerHTML=renderBubbles(m,{platform:true});}
 async function loadProactive(){const ps=await E('/proactive');document.getElementById('proactive').innerHTML=
  ps.map(p=>{const tag=p.red?'🔴':(p.watch?'⭐':'');const days=p.days!=null?p.days+'天':'';
  if(p.missing_channel)return `<div class=conv><div class=n>${tag} ${esc(p.name)} <span class=badge>缺渠道·救补</span></div><div class=p>${days} · 补微信/飞书号再拟</div></div>`;
