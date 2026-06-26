@@ -495,6 +495,11 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
   <h2>🧬 我是谁（用于 LLM·随时可改）</h2>
   <div class=row><textarea id=selfprofile rows=5 style="width:100%;border:1px solid #ccc;border-radius:6px;padding:6px" placeholder="班迪这个自然人：性格 / 灵魂 / 喜好 / 工作中的特征 / 核心词……（喂给 AI 起草/诊断，体现你的人味）"></textarea></div>
   <div class=row><button class=go onclick="saveProfile()">💾 保存「我是谁」</button></div>
+  <h2>📤 发送</h2>
+  <div class=row><label><input type=checkbox id=autosend_on> 选定/发送后自动发送</label>
+   倒数 <input id=autosend_secs type=number min=1 style=width:56px> 秒
+   <button class=go onclick="saveAuto()">💾 保存</button>
+   <span class=tag>关掉=必须点「确认发」才发</span></div>
   <h2>🔄 归一</h2>
   <div class=row><button class=go onclick="runReunify(false)">🔄 启动归一</button>
    <button class=danger onclick="runReunify(true)">♻️ 复位归一</button><span id=reuniout></span></div>
@@ -628,6 +633,7 @@ function personaSel(kind,id,cur){const o=PERSONAS.map(p=>`<option${p===cur?' sel
 function toggleSettings(){const s=document.getElementById('settings');
  if(s.classList.contains('hide')){s.classList.remove('hide');loadSettings()}else{s.classList.add('hide')}}
 async function loadSettings(){
+ {const cfg=autoCfg();document.getElementById('autosend_on').checked=cfg.on;document.getElementById('autosend_secs').value=cfg.secs;}
  const prof=await E('/self-profile');document.getElementById('selfprofile').value=(prof&&prof.profile)||'';
  const d=await E('/self');
  document.getElementById('self_reg').innerHTML=(d.registered||[]).map(s=>
@@ -655,6 +661,9 @@ async function markSelf(pid,name){if(!confirm('把「'+name+'」标为你自己?
 async function addSelf(kind,identifier,btn){const persona=btn.parentNode.querySelector('select').value;
  await P('/self',{kind,identifier,persona});toast('已纳入「我的」');loadSettings()}
 async function setPersona(kind,identifier,persona){await P('/self/persona',{kind,identifier,persona});toast('persona 已改: '+persona)}
+function saveAuto(){localStorage.setItem('amr_autosend',document.getElementById('autosend_on').checked?'1':'0');
+ localStorage.setItem('amr_autosend_secs',String(Math.max(1,parseInt(document.getElementById('autosend_secs').value,10)||5)));
+ toast('发送设置已存');}
 async function saveProfile(){await P('/self-profile',{profile:document.getElementById('selfprofile').value});toast('「我是谁」已保存 🧬')}
 async function removeSelf(kind,identifier){await P('/self/remove',{kind,identifier});loadSettings()}
 async function runReunify(reset){
