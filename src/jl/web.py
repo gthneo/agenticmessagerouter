@@ -477,6 +477,18 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 #settings select,#settings input{padding:3px 6px;border:1px solid #ccc;border-radius:6px;width:auto}
 #settings .x{border-color:#c99;color:#a33;padding:1px 7px}
 #reuniout{color:#176;font-size:13px;margin-left:8px}
+#mback,#mmatters{display:none}
+@media(max-width:640px){
+ body{flex-direction:column;height:100vh}
+ #side{width:100%;flex:1;border-right:0;border-bottom:1px solid #ddd}
+ #main{width:100%;flex:1}#right{width:100%;border-left:0}
+ body.m-chat #side{display:none}
+ body:not(.m-chat) #main,body:not(.m-chat) #right{display:none}
+ body.m-chat:not(.m-matters) #right{display:none}
+ body.m-chat.m-matters #right{position:fixed;inset:0;z-index:8;background:#fff;width:auto}
+ #mback,#mmatters{display:inline-block}
+ .bub{max-width:82%}
+}
 </style></head><body>
 <div id=side>
  <div class=sec>📞 该联系谁</div><div id=proactive></div>
@@ -485,7 +497,9 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  <div class=sec>🔗 待确认归并</div><div id=cands></div>
  <div class=sec>💬 会话</div>
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
-<div id=main><div id=hdr><button onclick="goHome()" style="margin-right:8px">← 收件箱</button>
+<div id=main><div id=hdr><button id=mback onclick="goHome()" style="margin-right:8px">← 列表</button>
+ <button onclick="goHome()" style="margin-right:8px">← 收件箱</button>
+ <button id=mmatters onclick="toggleMatters()" style="margin-right:8px">🩺事</button>
  <button onclick="toggleSettings()">⚙ 设置</button><b id=title>选择会话</b></div>
  <div id=settings class=hide>
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -570,7 +584,7 @@ async function doSend(){if(window.SENDTIMER){clearInterval(window.SENDTIMER);win
   if(r.ok){ta.value='';cancelSend();toast('已发送 ✅');loadOutbox();openConv(window.CURCONV);}
   else{c.className='err';c.innerHTML='<span class=txt>发送失败：'+esc(r.error||'未知')+'</span>'+
     ' <button class=go onclick="armSend()">重试</button> <button onclick="cancelSend()">取消</button>';}}
-async function openConv(id){window.CURCONV=id;cancelSend();const m=await E('/conversations/'+id+'/messages');
+async function openConv(id){window.CURCONV=id;cancelSend();document.body.classList.add('m-chat');const m=await E('/conversations/'+id+'/messages');
  document.getElementById('msgs').innerHTML=renderBubbles(m);
  loadSuggestions(id);loadMatters(id)}
 async function loadMatters(id){const ms=await E('/matters','conversation='+id);
@@ -676,11 +690,12 @@ async function connectChannel(pid,btn){const inp=btn.parentNode.querySelector('i
  if(!chat_id){alert('先填微信 chat_id');return}
  const r=await P('/connect',{person_id:pid,chat_id});
  if(r.ok){toast('已连渠道 🔗 ('+r.msgs+'条)');inp.value='';loadPersons()}else{alert('连失败：'+(r.error||'未知'))}}
-function goHome(){document.getElementById('title').textContent='选择会话';window.CURCONV=null;cancelSend();
+function goHome(){document.getElementById('title').textContent='选择会话';window.CURCONV=null;cancelSend();document.body.classList.remove('m-chat','m-matters');
  document.getElementById('settings').classList.add('hide');
  document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';
  document.getElementById('matters').innerHTML='';
  loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()}
+function toggleMatters(){document.body.classList.toggle('m-matters');}
 async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
  goHome()}
 document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='Enter')return;
