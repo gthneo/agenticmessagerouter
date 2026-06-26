@@ -25,12 +25,14 @@ _TYPE_PLACEHOLDER = {
     47: "[表情]", 48: "[位置]", 62: "[小视频]", 2000: "[转账]", 2001: "[红包]",
 }
 _TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
+_SYS_CONTENT_RE = re.compile(r"<content>(.*?)</content>", re.S)
 
 
 def clean_content(msg_type, content):
     """Turn a raw message into display text. Text → itself; media → a placeholder;
     app messages (49) → the backend's readable text (quote-reply / filename / link),
     falling back to '[链接] <title>' only when the content is raw <appmsg> XML;
+    system messages (10002 <sysmsg>: 撤回/拍一拍…) → their readable inner text;
     leaked XML in any type → a placeholder."""
     try:
         t = int(msg_type)
@@ -39,6 +41,13 @@ def clean_content(msg_type, content):
     c = content or ""
     if t in _TYPE_PLACEHOLDER:
         return _TYPE_PLACEHOLDER[t]
+    # system messages (revoke / pat / group-notice) arrive as <sysmsg> XML — surface
+    # the human-readable <content> (e.g. "修伟 撤回了一条消息") instead of leaking XML.
+    if t == 10002 or "<sysmsg" in c:
+        m = _SYS_CONTENT_RE.search(c)
+        if m:
+            return m.group(1).strip()   # e.g. '"修伟" 撤回了一条消息' (WeChat 原样含引号)
+        return "[系统消息]"
     if t == 49 or "<appmsg" in c:
         # Raw <appmsg> XML → pull the <title>. But this backend usually pre-cleans
         # type-49 into readable text (a quoted-reply's text, a filename, or

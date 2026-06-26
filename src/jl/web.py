@@ -435,7 +435,7 @@ INDEX_HTML = """<!doctype html><html lang=zh><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>AMR 收件箱</title><style>
 *{box-sizing:border-box}body{margin:0;font:14px/1.5 -apple-system,system-ui,sans-serif;display:flex;height:100vh}
-#side{width:300px;border-right:1px solid #ddd;overflow:auto}#main{flex:1;display:flex;flex-direction:column}
+#side{width:300px;border-right:1px solid #ddd;overflow:auto;flex-shrink:0}#main{flex:1;display:flex;flex-direction:column;min-width:0}
 .conv{padding:8px 12px;border-bottom:1px solid #eee;cursor:pointer}.conv:hover{background:#f5f5f5}
 .conv .n{font-weight:600}.conv .p{color:#888;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sec{padding:6px 10px;font-weight:600;background:#fafafa;border-bottom:1px solid #eee;color:#555;font-size:13px}
@@ -445,6 +445,7 @@ INDEX_HTML = """<!doctype html><html lang=zh><head><meta charset=utf-8>
 .cand button:hover{background:#d4f0e0}
 #hdr{padding:8px 12px;border-bottom:1px solid #ddd;display:flex;gap:8px;align-items:center}
 #msgs{flex:1;overflow:auto;padding:12px}.m{margin:6px 0}.m .s{font-weight:600;color:#333}.m .t{color:#aaa;font-size:11px;margin-left:6px}
+.m div{overflow-wrap:anywhere;word-break:break-word}
 input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 .ob{padding:8px 12px;border-bottom:1px solid #eee}.ob .p{color:#888;font-size:12px}.ob .b{margin:3px 0}
 .ob button{margin:4px 6px 0 0;padding:3px 10px;border-radius:6px;cursor:pointer;border:1px solid #ccc;background:#f7f7f7}
@@ -452,7 +453,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 #replybox{border-top:1px solid #ddd;padding:8px 12px;display:flex;gap:8px;align-items:flex-start}
 #replybox textarea{flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font:inherit;resize:vertical}
 #replybox button{padding:6px 12px;border:1px solid #48a;background:#e8f0fb;color:#147;border-radius:6px;cursor:pointer;white-space:nowrap}
-#right{width:330px;border-left:1px solid #ddd;overflow:auto;display:flex;flex-direction:column}
+#right{width:330px;border-left:1px solid #ddd;overflow:auto;display:flex;flex-direction:column;flex-shrink:0}
 @keyframes fl{from{background:#fff3cd}to{background:#fff}}.flash{animation:fl .7s}
 .matter{padding:8px 12px;border-bottom:1px solid #eee}.matter .h{font-weight:600}
 .matter .dg{color:#a40;font-size:12px;margin:3px 0}.matter .cm{color:#555;font-size:12px}

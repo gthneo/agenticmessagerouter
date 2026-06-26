@@ -46,6 +46,19 @@ def test_clean_content_app_msg_keeps_backend_readable_text():
     assert fw.clean_content(49, "") == "[链接/文件]"                        # empty → placeholder
 
 
+def test_clean_content_sysmsg_revoke_shows_readable_text():
+    # revoke / system messages arrive as <sysmsg> XML — surface the readable inner
+    # text, never leak the raw XML into the timeline (regression: 修伟 撤回 showed XML).
+    xml = ('<?xml version="1.0"?><sysmsg type="revokemsg"><revokemsg>'
+           '<content>"修伟" 撤回了一条消息</content><revoketime>0</revoketime>'
+           '</revokemsg></sysmsg>')
+    assert fw.clean_content(10002, xml) == '"修伟" 撤回了一条消息'
+    # detected by content even if type is mislabeled
+    assert fw.clean_content(1, xml) == '"修伟" 撤回了一条消息'
+    # a sysmsg with no <content> degrades to a placeholder, not raw XML
+    assert fw.clean_content(10002, '<sysmsg type="pat"><pat></pat></sysmsg>') == "[系统消息]"
+
+
 def test_clean_content_strips_leaked_xml_even_if_typed_text():
     # defensive: a media blob mislabeled type=1 must not dump raw XML into the timeline
     blob = '<msg><img cdnthumburl="305f02..." cdnthumbaeskey="750b3c"/></msg>'
