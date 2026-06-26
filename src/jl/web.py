@@ -477,7 +477,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 #settings select,#settings input{padding:3px 6px;border:1px solid #ccc;border-radius:6px;width:auto}
 #settings .x{border-color:#c99;color:#a33;padding:1px 7px}
 #reuniout{color:#176;font-size:13px;margin-left:8px}
-#mback,#mmatters{display:none}
+#mback,#mmatters,#mclose{display:none}
 @media(max-width:640px){
  body{flex-direction:column;height:100vh}
  #side{width:100%;flex:1;border-right:0;border-bottom:1px solid #ddd}
@@ -486,6 +486,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  body:not(.m-chat) #main,body:not(.m-chat) #right{display:none}
  body.m-chat:not(.m-matters) #right{display:none}
  body.m-chat.m-matters #right{position:fixed;inset:0;z-index:8;background:#fff;width:auto}
+ body.m-chat.m-matters #mclose{display:block;position:sticky;top:0;z-index:9;width:100%;padding:10px 12px;background:#f7f7f7;border:0;border-bottom:1px solid #ddd;text-align:left;font-size:14px;cursor:pointer}
  #mback,#mmatters{display:inline-block}
  .bub{max-width:82%}
 }
@@ -525,6 +526,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
  <span id=sendbar><button onclick="armSend()">发送 →</button></span>
  <button onclick="aiDraft()">✨ AI 拟话术</button></div></div>
 <div id=right>
+ <button id=mclose onclick="toggleMatters()">← 返回会话</button>
  <div class=sec>🗂 事（这条会话）<button onclick="createMatter()" style="float:right;font-size:12px">＋记一件事</button></div>
  <div id=matters></div>
  <div class=sec>✨ 话术 <span style="font-weight:400;color:#a40;font-size:12px">· 先🩺诊断更准</span></div><div id=suggest></div></div>
