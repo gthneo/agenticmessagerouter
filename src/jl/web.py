@@ -460,6 +460,7 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
 #replybox textarea{flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font:inherit;resize:vertical}
 #replybox button{padding:6px 12px;border:1px solid #48a;background:#e8f0fb;color:#147;border-radius:6px;cursor:pointer;white-space:nowrap}
 #right{width:330px;border-left:1px solid #ddd;overflow:auto;display:flex;flex-direction:column;flex-shrink:0}
+#countbar{padding:8px 12px;border-top:1px solid #eee;background:#fffbe6;display:flex;gap:8px;align-items:center;flex-wrap:wrap}#countbar.hide{display:none}#countbar .txt{flex:1;min-width:120px;color:#333;overflow-wrap:anywhere}#countbar .cd{font-weight:700;color:#a40;white-space:nowrap}#countbar button{padding:4px 12px;border-radius:6px;cursor:pointer;border:1px solid #ccc;background:#f7f7f7}#countbar button.go{border-color:#4a8;background:#e8f7ee;color:#176}#countbar button:disabled{opacity:.5;cursor:default}#countbar.err{background:#fbecec}
 @keyframes fl{from{background:#fff3cd}to{background:#fff}}.flash{animation:fl .7s}
 .matter{padding:8px 12px;border-bottom:1px solid #eee}.matter .h{font-weight:600}
 .matter .dg{color:#a40;font-size:12px;margin:3px 0}.matter .cm{color:#555;font-size:12px}
@@ -500,8 +501,9 @@ input{padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%}
   <h2>👥 人管理</h2><div id=people></div>
  </div>
  <div id=msgs></div>
- <div id=replybox><textarea id=reply rows=2 placeholder="点右侧「用此版」填入，可改；「暂存待发」后去左边确认真发"></textarea>
- <span id=sendbar><button onclick="sendReply()">发送 →</button></span>
+ <div id=countbar class=hide></div>
+ <div id=replybox><textarea id=reply rows=2 placeholder="选右侧话术或自己打字 → 发送后倒数自动发，倒数内可「改改」"></textarea>
+ <span id=sendbar><button onclick="armSend()">发送 →</button></span>
  <button onclick="aiDraft()">✨ AI 拟话术</button></div></div>
 <div id=right>
  <div class=sec>🗂 事（这条会话）<button onclick="createMatter()" style="float:right;font-size:12px">＋记一件事</button></div>
@@ -533,18 +535,37 @@ async function loadConvs(){const c=await E('/conversations');c.forEach(x=>window
 function toast(msg){const t=document.createElement('div');t.textContent=msg;
  t.style.cssText='position:fixed;bottom:20px;right:20px;background:#176;color:#fff;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:9';
  document.body.appendChild(t);setTimeout(()=>t.remove(),2500)}
-function resetSendbar(){document.getElementById('sendbar').innerHTML='<button onclick="sendReply()">发送 →</button>'}
-function sendReply(){if(!window.CURCONV){alert('先选会话');return}
- const body=document.getElementById('reply').value.trim();if(!body)return;
- const who=window.NAMES[window.CURCONV]||'对方';
- document.getElementById('sendbar').innerHTML=
- `<button class=send onclick="confirmSend()">✅ 确认发给 ${esc(who)}</button> <button onclick="resetSendbar()">✕ 改改</button>`}
-async function confirmSend(){const ta=document.getElementById('reply'),body=ta.value.trim();if(!body){resetSendbar();return}
- const row=await P('/outbox',{conversation_id:window.CURCONV,body});
- const r=await P('/outbox/confirm',{id:row.id});resetSendbar();
- if(r.ok){ta.value='';toast('已发送 ✅')}else{alert('发送失败：'+(r.error||'未知'))}
- loadOutbox()}
-async function openConv(id){window.CURCONV=id;resetSendbar();const m=await E('/conversations/'+id+'/messages');
+function autoCfg(){return {on:localStorage.getItem('amr_autosend')!=='0',
+  secs:Math.max(1,parseInt(localStorage.getItem('amr_autosend_secs')||'5',10)||5)};}
+function cancelSend(){if(window.SENDTIMER){clearInterval(window.SENDTIMER);window.SENDTIMER=null;}
+  const c=document.getElementById('countbar');c.className='hide';c.innerHTML='';}
+function cancelEdit(){cancelSend();document.getElementById('reply').focus();}
+function armSend(){if(!window.CURCONV){alert('先选会话');return;}
+  const ta=document.getElementById('reply'),body=ta.value.trim();if(!body)return;
+  cancelSend();
+  const who=window.NAMES[window.CURCONV]||'对方',cfg=autoCfg(),c=document.getElementById('countbar');
+  c.className='';
+  const bar=(head,goLabel)=>{c.innerHTML=head+
+    ' <button class=go onclick="doSend()">'+goLabel+'</button>'+
+    ' <button id=cancelbtn onclick="cancelEdit()">改改</button>';
+    const cb=document.getElementById('cancelbtn');if(cb)cb.focus();};
+  if(cfg.on){let left=cfg.secs;
+    const tick=()=>bar('<span class=cd>⏳ '+left+'s</span><span class=txt>后自动发给 '+esc(who)+'：'+esc(body)+'</span>','立即发');
+    tick();
+    window.SENDTIMER=setInterval(()=>{left--;if(left<=0){doSend();}else{tick();}},1000);
+  }else{
+    bar('<span class=txt>确认发给 '+esc(who)+'：'+esc(body)+'</span>','确认发');
+  }}
+async function doSend(){if(window.SENDTIMER){clearInterval(window.SENDTIMER);window.SENDTIMER=null;}
+  const ta=document.getElementById('reply'),body=ta.value.trim(),c=document.getElementById('countbar');
+  if(!body){cancelSend();return;}
+  c.querySelectorAll('button').forEach(b=>{b.disabled=true;});
+  const row=await P('/outbox',{conversation_id:window.CURCONV,body});
+  const r=await P('/outbox/confirm',{id:row.id});
+  if(r.ok){ta.value='';cancelSend();toast('已发送 ✅');loadOutbox();openConv(window.CURCONV);}
+  else{c.className='err';c.innerHTML='<span class=txt>发送失败：'+esc(r.error||'未知')+'</span>'+
+    ' <button class=go onclick="armSend()">重试</button> <button onclick="cancelSend()">取消</button>';}}
+async function openConv(id){window.CURCONV=id;cancelSend();const m=await E('/conversations/'+id+'/messages');
  document.getElementById('msgs').innerHTML=renderBubbles(m);
  loadSuggestions(id);loadMatters(id)}
 async function loadMatters(id){const ms=await E('/matters','conversation='+id);
@@ -567,8 +588,7 @@ async function loadSuggestions(id){const s=await E('/conversations/'+id+'/sugges
  document.getElementById('suggest').innerHTML=(s.length?'<div class=p>✨ '+(s[0].kind==='opener'?'主动开场':'话术')+'（用此版填入下方，可改）:</div>':'')+
  s.map(x=>`<div class=ob><div class=p>[${esc(x.stance)}]</div><div class=b>${esc(x.body)}</div>
  <button onclick="useDraft(${x.id})">用此版</button> <button onclick="dismissSug(${x.id})">✕</button></div>`).join('')}
-function useDraft(id){const r=document.getElementById('reply');r.value=window.SUG[id]||'';
- r.scrollIntoView({block:'center'});r.focus();r.classList.add('flash');setTimeout(()=>r.classList.remove('flash'),700);}
+function useDraft(id){const r=document.getElementById('reply');r.value=window.SUG[id]||'';armSend();}
 async function aiDraft(){if(!window.CURCONV){alert('先选会话');return}
  const r=await P('/draft-assist',{conversation_id:window.CURCONV});
  if(!r.ok){alert(r.error||'LLM 不可用');return}loadSuggestions(window.CURCONV)}
@@ -647,7 +667,7 @@ async function connectChannel(pid,btn){const inp=btn.parentNode.querySelector('i
  if(!chat_id){alert('先填微信 chat_id');return}
  const r=await P('/connect',{person_id:pid,chat_id});
  if(r.ok){toast('已连渠道 🔗 ('+r.msgs+'条)');inp.value='';loadPersons()}else{alert('连失败：'+(r.error||'未知'))}}
-function goHome(){document.getElementById('title').textContent='选择会话';window.CURCONV=null;resetSendbar();
+function goHome(){document.getElementById('title').textContent='选择会话';window.CURCONV=null;cancelSend();
  document.getElementById('settings').classList.add('hide');
  document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';
  document.getElementById('matters').innerHTML='';
