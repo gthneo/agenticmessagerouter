@@ -72,10 +72,20 @@
 | `chat_history` | `chat_history` | `{title, items?}` — 合并转发；`items` = `[{author, kind, text}]`（可选；解不动就只给 `title`）。 |
 | `location` | `location` | `{label?, poi?, lat?, lng?}` — `label` 地名，`poi` POI 名。坐标可省。 |
 | `system` | `system` | `{event, actor?, text}` — `event ∈ {revoke, pat, member_change, notice}`；`actor` = 触发者显示名。 |
-| `media` | `image` `voice` `video` `sticker` | `{placeholder, ref?, transcript?}` — `placeholder` = `[图片]`/`[语音]`… ；`ref` = CDN/本地引用（供后续取媒体，对齐 `media` 表 `source_ref`）；`transcript` = 语音转写（可选 ASR assist）。 |
+| `media` | `image` `voice` `video` `sticker` | `{placeholder, ref?, mime?, duration?}` — `placeholder` = `[图片]`/`[语音]`… ；`ref` = CDN/本地引用（供后续取媒体，对齐 `media` 表 `source_ref`）；`mime`/`duration`（语音/视频秒数）给得出就给。**`transcript`（语音转写）不在后端职责内** —— 见 §2.3。 |
 | `payment` | `transfer` `red_packet` | `{amount?, memo?, stage?}` — `amount` 如 `"¥100.00"`；`stage` = 收发阶段（survey: paysubtype 1/3/4/5/7）。 |
 
 > 不在表内的字段一律不要求。后端只 emit 它解得出的子对象；缺失即「这一维我没解」，AMR 不报错。
+
+### 2.3 语音 / ASR 边界（后端 vs AMR — 重要）
+
+转写不属于契约。职责切清：
+
+- **后端（老二）**：只吐**音频引用** `media.{ref, mime, duration}` + `placeholder:"[语音]"`。**不做 ASR**。契约是 representation-only。
+- **AMR（assist 层下游产物）**：取流（`media` 管线 `source_ref` → 下载/转码 silk/amr → `status:fetched`）→ **ASR**（LLM-optional、provider-agnostic，走 `llm`/独立 ASR 抽象）→ 写 `media.transcript` → 气泡在 `[语音]` 下挂转写文字。无 ASR provider → 停在 `[语音]`，人去原生微信听（人在回路兜底）。
+- **双向一致**：`in`（对方语音）/`out`（自己回灌的语音）都走 `kind:voice` + `ref`，AMR 统一转写，与哪个后端无关。
+- **AMR 不"发"语音**（发送链路纯文本 outbox→confirm）；要发语音用原生微信。
+- ⚠️ 勿与 `assist.py` 里的 `_voice_block`/`VOICE_GUIDE` 混淆——那是「**文字口吻**沉淀」（模仿用户语气），不是语音 ASR。
 
 ## 3. Canonical `kind` 枚举（封闭，15 个）
 
