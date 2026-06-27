@@ -77,17 +77,21 @@
 | `chat_history` | `chat_history` | `{title, items?}` — 合并转发；`items` = `[{author, kind, text}]`（可选；解不动就只给 `title`）。 |
 | `location` | `location` | `{label?, poi?, lat?, lng?}` — `label` 地名，`poi` POI 名。坐标可省。 |
 | `system` | `system` | `{event, actor?, text}` — `event ∈ {revoke, pat, member_change, notice}`；`actor` = 触发者显示名。 |
-| `media` | `image` `voice` `video` `sticker` | `{placeholder, ref?, mime?, duration?}` — `placeholder` = `[图片]`/`[语音]`… ；`ref` = CDN/本地引用（供后续取媒体，对齐 `media` 表 `source_ref`）；`mime`/`duration`（语音/视频秒数）给得出就给。**`transcript`（语音转写）不在后端职责内** —— 见 §2.3。 |
+| `media` | `image` `voice` `video` `sticker` | `{placeholder, ref?, mime?, duration?, transcript?}` — `placeholder` = `[图片]`/`[语音]`… ；**`ref` = 后端可直接 GET 到「解密后字节」的绝对 HTTP URL**（如 fullwechat `GET /api/media/{chat_id}/{msg_id}`），**不是微信 cdnurl**（cdnurl 加密、消费方下不了，真身只有后端能解）。AMR GET `ref` 时**带该通道的 bearer auth**。`mime`/`duration` 给得出就给。**`transcript`（语音转写）= 后端能转就给**（如微信自带语音转文字）；给了 AMR 直接显示、不再转 —— 见 §2.3。 |
 | `payment` | `transfer` `red_packet` | `{amount?, memo?, stage?}` — `amount` 如 `"¥100.00"`；`stage` = 收发阶段（survey: paysubtype 1/3/4/5/7）。 |
 
 > 不在表内的字段一律不要求。后端只 emit 它解得出的子对象；缺失即「这一维我没解」，AMR 不报错。
 
 ### 2.3 语音 / ASR 边界（后端 vs AMR — 重要）
 
-转写不属于契约。职责切清：
+**转写优先后端提供（王总 2026-06-28 钦定）**：微信自带「语音转文字」，让后端转好、连文字一起吐，AMR 直接显示——**无需专门建本地 ASR 引擎**。职责：
 
-- **后端（老二）**：只吐**音频引用** `media.{ref, mime, duration}` + `placeholder:"[语音]"`。**不做 ASR**。契约是 representation-only。
-- **AMR（assist 层下游产物）**：取流（`media` 管线 `source_ref` → 下载/转码 silk/amr → `status:fetched`）→ **ASR**（LLM-optional、provider-agnostic，走 `llm`/独立 ASR 抽象）→ 写 `media.transcript` → 气泡在 `[语音]` 下挂转写文字。无 ASR provider → 停在 `[语音]`，人去原生微信听（人在回路兜底）。
+- **后端（fullwechat 仁德 / PowerData 老二）**：语音**优先用自身能力（微信自带语音转文字）转好 → 连 `media.transcript` 一起吐**；同时给 `ref`(取件端点，返回解密原始字节如 silk) + `mime` + `duration`（供播放 / AMR 兜底）。**能转就转，转不了就只给 ref。**
+- **AMR**：
+  1. **后端给了 `transcript`** → ingest 直接写 `media.transcript`、气泡挂字，**不再转**（首选路径）。
+  2. 后端没给 transcript 但有 `ref` **且**配了 ASR 端点 → AMR **兜底**转写（`asr.py`，provider-agnostic、LLM-optional：GET ref 带 bearer auth → 转码 silk→wav → ASR → 写 transcript）。**默认不配 ASR 端点**（首选靠后端/微信转写）。
+  3. 都没有 → 停 `[语音]`，人去原生微信听（人在回路兜底）。
+- **双向一致**：`in`/`out` 都走 `kind:voice`；transcript 谁给都行，AMR 统一显示。AMR 不"发"语音。
 - **双向一致**：`in`（对方语音）/`out`（自己回灌的语音）都走 `kind:voice` + `ref`，AMR 统一转写，与哪个后端无关。
 - **AMR 不"发"语音**（发送链路纯文本 outbox→confirm）；要发语音用原生微信。
 - ⚠️ 勿与 `assist.py` 里的 `_voice_block`/`VOICE_GUIDE` 混淆——那是「**文字口吻**沉淀」（模仿用户语气），不是语音 ASR。

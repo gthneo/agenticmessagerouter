@@ -381,3 +381,22 @@ def test_ingest_voice_without_ref_creates_no_media(conn):
          "msg_id": "v2", "media": {"placeholder": "[语音]"}})   # no ref
     db.ingest_records(conn, account_id=1, platform="wechat", conv=conv, msgs=[rec])
     assert conn.execute("SELECT COUNT(*) FROM media").fetchone()[0] == 0
+
+
+def test_voice_backend_transcript_skips_asr():
+    """后端(微信)给了 transcript → media 行直接 done、不进待转写队列(王总 2026-06-28 钦定首选后端转写)。"""
+    import jl.db as d, jl.ingest as ig
+    conn = d.connect(":memory:"); d.init_db(conn)
+    conn.execute("INSERT INTO accounts(account_id,platform,created_at) VALUES(1,'wechat',0)")
+    conn.execute("INSERT INTO conversations(account_id,platform,chat_id,created_at,updated_at) VALUES(1,'wechat','c',0,0)")
+    cid = conn.execute("SELECT id FROM conversations").fetchone()[0]
+    # canonical voice envelope WITH a backend transcript
+    env = {"schema": "message.canonical/1", "channel": "wechat", "kind": "voice",
+           "text": "[语音]", "ts": 1, "sender": "张三", "direction": "in",
+           "media": {"placeholder": "[语音]", "ref": "http://h/api/media/c/9",
+                     "mime": "audio/silk", "duration": 3, "transcript": "明天下午三点开会"}}
+    rec = ig.from_canonical(env, source="fullwx")
+    d.insert_messages(conn, cid, [rec])
+    m = conn.execute("SELECT kind,status,transcript FROM media WHERE kind='voice'").fetchone()
+    assert m["status"] == "done" and m["transcript"] == "明天下午三点开会"
+    assert d.pending_voice_media(conn) == []        # 有 transcript → 不待转写

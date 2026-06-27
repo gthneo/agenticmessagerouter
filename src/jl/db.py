@@ -568,11 +568,13 @@ def insert_messages(conn, conversation_id, records):
              json.dumps(r.raw, ensure_ascii=False), now),
         )
         inserted += cur.rowcount
-        # voice message carrying a media.ref → create a (待转写) media row for ASR.
-        # Only for newly-inserted rows (rowcount==1); dedup-skipped (0) are left alone.
-        if cur.rowcount and r.type == "voice" and (r.raw or {}).get("ref"):
+        # voice message → create a media row. 后端给了 transcript(微信转写)→直接 done、气泡挂字；
+        # 否则有 ref 则待 AMR 兜底转写。Only for newly-inserted rows (rowcount==1).
+        rm = r.raw or {}
+        if cur.rowcount and r.type == "voice" and (rm.get("ref") or rm.get("transcript")):
             add_media(conn, message_id=cur.lastrowid, kind="voice",
-                      source_ref=r.raw["ref"], mime=(r.raw or {}).get("mime", ""))
+                      source_ref=rm.get("ref", ""), mime=rm.get("mime", ""),
+                      transcript=rm.get("transcript", ""))
         if r.ts > max_ts:
             max_ts = r.ts
     if max_ts:
@@ -601,11 +603,14 @@ def ingest_records(conn, *, account_id, platform, conv, msgs):
 
 # ----- media (voice/image/file blobs + ASR transcripts) ---------------------
 
-def add_media(conn, *, message_id, kind, source_ref="", mime="", status="pending"):
-    """Create a media row for a message (e.g. voice audio ref from canonical media.ref)."""
+def add_media(conn, *, message_id, kind, source_ref="", mime="", status="pending", transcript=""):
+    """Create a media row for a message. transcript 给了(后端/微信自带语音转文字)→ status='done'、
+    直接可显示、跳过 AMR ASR(王总 2026-06-28 钦定首选后端转写)；否则待 AMR 兜底转写。"""
+    if transcript:
+        status = "done"
     cur = conn.execute(
-        "INSERT INTO media (message_id, kind, source_ref, mime, status) VALUES (?,?,?,?,?)",
-        (message_id, kind, source_ref, mime, status))
+        "INSERT INTO media (message_id, kind, source_ref, mime, status, transcript) VALUES (?,?,?,?,?,?)",
+        (message_id, kind, source_ref, mime, status, transcript))
     conn.commit()
     return cur.lastrowid
 
