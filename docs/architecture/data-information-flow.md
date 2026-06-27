@@ -118,10 +118,87 @@ flowchart LR
 
 ---
 
+## 四、数据存储 · 人的记忆 · 事的感知
+
+**存储方式**：单库 **SQLite `~/.config/jl/jl.db`**，DDL 唯一真相源 `src/jl/schema.sql`，stdlib 零依赖。
+真相源与源系统解耦（System of Engagement）；入站**幂等**（`msg_key` 去重），派生状态（`direction` /
+染色 / 归一）**算在原始之上**；**可回灌**——删 AMR 库压不住，活通道是终极源。
+
+![存储·人的记忆·事的感知](img/storage-memory-perception.png)
+
+### 人的记忆（memory of people）—— 以**自然人为锚**的关系记忆
+
+| 表 / 文件 | 记住什么 |
+|---|---|
+| `persons` | **自然人锚**（name / category / threshold_days / aliases）—— "TA 是谁" |
+| `channels` | **端点**（person × 渠道 × 号 · pinned）一人多渠道每渠道多号 —— "怎么找到 TA" |
+| `messages`(跨渠道合并) | **时间线** —— "TA 说过什么 / 我们聊过什么" |
+| 派生：染色 weight×recency / 阈值 | "TA 多久没联系 / 该不该主动" |
+| `self_identities` | **用户本人**（多渠道多身份 · persona）—— 出站识别 + 排除自我 |
+| `self-profile`(我是谁) + 口吻样本 | "**你**是谁 / 你怎么说话" —— 喂 LLM 的人味 |
+
+> **归一**是记忆一致性的机制：同一自然人跨渠道 / 账号 / 工具 → 收成**一个 person、一条连续记忆**。
+> 合起来，AMR 对"人"的记忆 = 锚 + 端点 + 时间线 + 派生信号 + 自我 + 人味，**持久且结构化**。
+
+### 事的感知（perception of matters / 业务）—— 在人与会话**之上**的业务抽象
+
+| 表 | 感知什么 |
+|---|---|
+| `matters` 事卡 | 一件业务事（title / kind / status / **diagnosis = T4 结构化诊断对象**） |
+| `matter_persons` · `matter_conversations`(M:N) | 一件事**横跨多人 + 多会话** |
+| `commitments` 承诺 | 这件事里**谁承诺了什么**（可跟踪 / 办结） |
+| `status`(open/handled) | 这件事**到哪一步** |
+
+> 事卡把散落在**多人多会话**里的业务线索，聚成一张**可诊断 / 可跟踪 / 可办结**的卡 ——
+> 这是「**信息 → 感知**」的跃迁（从原始消息到业务状态）。
+
+### 串起来
+
+- **三栏 = 三类存储的 UI 投影**：**人**(关系记忆) ｜ **会话**(原始时间线) ｜ **事**(业务感知)。
+- **留痕也是记忆**：`events / logs / tokens` = "发生过什么"（谁 / 何时 / 为什么 + AI 花费），既审计又改进。
+- **记忆层次**：短期(会话时间线) ↔ 结构化长期(persons / matters / self) ↔ 元记忆(events 谁做了什么)。
+
+<details><summary>mermaid 源码（图3）</summary>
+
+```mermaid
+flowchart TB
+  classDef person fill:#F0E6F7,stroke:#8E5BB0,color:#2a1038
+  classDef raw fill:#E8EEF7,stroke:#5B7FB0,color:#1a2a3a
+  classDef matter fill:#FFF4D6,stroke:#C9A227,color:#3a3000
+  classDef audit fill:#E6F4EA,stroke:#3C9A57,color:#103a1e
+
+  P[("persons · 自然人锚<br/>name/category/阈值/别名")]:::person
+  CHN[("channels · 端点<br/>person×渠道×号·pinned<br/>一人多渠道每渠道多号")]:::person
+  SELF[("self_identities · 用户本人<br/>多渠道多身份·persona")]:::person
+  PROF["我是谁 self-profile + 口吻样本<br/>(喂 LLM 的人味)"]:::person
+  CONV[("conversations<br/>account×chat_id · person_id")]:::raw
+  MSG[("messages · 时间线<br/>kind · direction · raw")]:::raw
+  MED[("media · blob · transcript")]:::raw
+  M[("matters · 事卡<br/>title·kind·status·diagnosis(T4结构化)")]:::matter
+  MP["matter_persons (M:N)"]:::matter
+  MC["matter_conversations (M:N)"]:::matter
+  COM[("commitments · 承诺")]:::matter
+  EV[("events / logs / tokens<br/>谁·何时·为什么 + AI 成本")]:::audit
+
+  P --> CHN
+  P --> CONV --> MSG --> MED
+  SELF -. 出站识别/排除自我 .-> MSG
+  PROF -. 注入起草/诊断 .-> M
+  M --> MP --> P
+  M --> MC --> CONV
+  M --> COM
+  EV -. 贯穿留痕 .-> M
+```
+
+</details>
+
+---
+
 ## 收
 
 信息从通道汇入真相源（信息池）→ 规则层立秩序（归一 / 染色）→ **LLM 旁路加智能（可选 · 可换 · 可降级）**
-→ 人守闸做决策与负责。这就是「**引入大模型、但人始终在回路、模型不掉链子也不绑架**」的流转框架。
+→ 人守闸做决策与负责。**存储上：以自然人为锚记住"人"，以事卡聚合感知"事"，留痕记住"发生过什么"。**
+这就是「**引入大模型、但人始终在回路、模型不掉链子也不绑架**」的流转与记忆框架。
 
 > 渲染：PNG 在 `img/` 下，GitHub 直接显示；mermaid 源码可改后用 `mmdc` 重导
 > （`npx -p @mermaid-js/mermaid-cli mmdc -i x.mmd -o x.png -s 2 -b white`）。
