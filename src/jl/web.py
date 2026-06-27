@@ -158,6 +158,31 @@ def api_dismiss_suggestion(conn, payload):
     return {"ok": True}
 
 
+# 接入后端地址(可填 FQDN/域名)。fullwechat/powerdata 各读自己的 ~/.config/jl/<tool>_url 文件，
+# adapter 每次实例化时读 → 改了下次调用即生效。env 优先级仍高于文件(见各 adapter _default_url)。
+_BACKEND_FILES = {"fullwechat": "~/.config/jl/fullwechat_url",
+                  "powerdata": "~/.config/jl/powerdata_url"}
+
+
+def api_backends(conn):
+    from .channels import fullwechat, powerdata
+    return {"fullwechat": fullwechat._default_url(), "powerdata": powerdata._default_url()}
+
+
+def api_set_backend(conn, payload):
+    tool = payload.get("tool")
+    url = (payload.get("url") or "").strip()
+    if tool not in _BACKEND_FILES:
+        return {"ok": False, "error": "unknown tool"}
+    p = os.path.expanduser(_BACKEND_FILES[tool])
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(url)
+    db.log_event(conn, kind="set_backend", actor=payload.get("actor", "user"),
+                 detail={"tool": tool, "url": url})
+    return {"ok": True, "url": url}
+
+
 def api_self(conn):
     """SELF(自我) settings: registered own-identities + auto suggestions for HITL checkbox."""
     return {"registered": db.get_self_identities(conn),
@@ -345,6 +370,8 @@ def make_handler(db_path):
                     return self._send(200, api_logs(conn, params))
                 if u.path == "/api/self":
                     return self._send(200, api_self(conn))
+                if u.path == "/api/backends":
+                    return self._send(200, api_backends(conn))
                 if u.path == "/api/matters":
                     return self._send(200, api_matters(conn, params))
                 if u.path == "/api/outbox":
@@ -406,6 +433,8 @@ def make_handler(db_path):
                     return self._send(200, api_set_self_persona(conn, payload))
                 if u.path == "/api/self-profile":
                     return self._send(200, api_set_self_profile(conn, payload))
+                if u.path == "/api/backend":
+                    return self._send(200, api_set_backend(conn, payload))
                 if u.path == "/api/reunify":
                     return self._send(200, api_reunify(conn, payload))
                 if u.path == "/api/watch":
@@ -473,6 +502,8 @@ INDEX_HTML = """<!doctype html><html lang=zh><head><meta charset=utf-8>
 .m .t{color:var(--fg2);font-size:11px;margin:1px 4px 0}
 .sys{text-align:center;color:var(--fg2);font-size:12px;margin:8px auto;max-width:80%}
 .tsep{text-align:center;color:var(--fg2);font-size:11px;margin:10px 0}
+.bub.card{display:flex;flex-direction:column;gap:2px}.card .ct{font-weight:600}.card .cs{font-size:11px;color:var(--fg2)}.card .cu{font-size:11px;color:var(--blue);overflow-wrap:anywhere;opacity:.9}
+.qref{margin-top:5px;padding:4px 7px;border-left:2px solid var(--fg2);background:rgba(127,127,127,.12);font-size:12px;color:var(--fg2);border-radius:3px;white-space:pre-wrap}
 input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100%;background:var(--bg);color:var(--fg)}
 .ob{padding:8px 12px;border-bottom:1px solid var(--border2)}.ob .p{color:var(--fg2);font-size:12px}.ob .b{margin:3px 0}
 .ob button{margin:4px 6px 0 0;padding:3px 10px;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:var(--panel)}
@@ -531,6 +562,13 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
   <h2>🧬 我是谁（用于 LLM·随时可改）</h2>
   <div class=row><textarea id=selfprofile rows=5 style="width:100%;border:1px solid #ccc;border-radius:6px;padding:6px" placeholder="班迪这个自然人：性格 / 灵魂 / 喜好 / 工作中的特征 / 核心词……（喂给 AI 起草/诊断，体现你的人味）"></textarea></div>
   <div class=row><button class=go onclick="saveProfile()">💾 保存「我是谁」</button></div>
+  <h2>🔌 接入后端（可填 FQDN 域名）</h2>
+  <div class=row><span class=tag>fullwechat</span>
+   <input id=be_fullwechat style="flex:1;min-width:200px" placeholder="http://wx.example.com:6174">
+   <button class=go onclick="saveBackend('fullwechat')">💾 保存</button></div>
+  <div class=row><span class=tag>powerdata</span>
+   <input id=be_powerdata style="flex:1;min-width:200px" placeholder="http://host:8765/mcp">
+   <button class=go onclick="saveBackend('powerdata')">💾 保存</button></div>
   <h2>🎨 主题</h2>
   <div class=row>
    <label><input type=radio name=theme value=system onchange="setTheme('system')"> 跟随系统</label>
@@ -564,16 +602,35 @@ const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetc
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function fmt(ts){return ts?new Date(ts*1000).toLocaleString('zh-CN'):''}
 window.NAMES={};window.SCROLLPOS={};
+function _mjson(s){try{return (s&&typeof s==='object')?s:JSON.parse(s||'{}');}catch(e){return {};}}
+function _sz(n){n=+n||0;return n>=1048576?(n/1048576).toFixed(1)+'MB':n>=1024?(n/1024).toFixed(0)+'KB':n?n+'B':'';}
+const RICHKINDS=new Set(['link','file','quote','miniprogram','chat_history','location']);
+// 按 canonical kind 富渲气泡内体；canonical 字段在 messages.raw(JSON)；非 canonical kind 返回 null → 退回纯文本
+function renderKind(x){const m=_mjson(x.raw),k=x.type,b=esc(x.content||m.text||'');
+ if(k==='quote'){const a=esc(m.author||''),r=esc(m.refText||'');
+  return '<div class=bub>'+b+'<div class=qref>↩ '+(a?a+'：':'')+r+'</div></div>';}
+ if(k==='link'){return '<div class="bub card"><div class=ct>🔗 '+esc(m.title||x.content||'[链接]')+'</div>'
+  +(m.source?'<div class=cs>'+esc(m.source)+'</div>':'')+(m.url?'<div class=cu>'+esc(m.url)+'</div>':'')+'</div>';}
+ if(k==='file'){const s=_sz(m.size);return '<div class="bub card"><div class=ct>📎 '+esc(m.name||x.content||'[文件]')+'</div>'
+  +((m.ext||s)?'<div class=cs>'+esc(m.ext||'')+(m.ext&&s?' · ':'')+s+'</div>':'')+'</div>';}
+ if(k==='miniprogram'){return '<div class="bub card"><div class=ct>🔲 '+esc(m.title||x.content||'[小程序]')+'</div>'
+  +(m.source?'<div class=cs>'+esc(m.source)+'</div>':'')+'</div>';}
+ if(k==='chat_history'){const n=(m.items&&m.items.length)?' · '+m.items.length+'条':'';
+  return '<div class="bub card"><div class=ct>🗂 '+esc(m.title||x.content||'[聊天记录]')+n+'</div></div>';}
+ if(k==='location'){return '<div class="bub card"><div class=ct>📍 '+esc(m.label||m.poi||x.content||'[位置]')+'</div></div>';}
+ return null;}
 function renderBubbles(m,opt){opt=opt||{};let out='',last=0;
  (m||[]).forEach(x=>{
   if(x.ts&&last&&x.ts-last>300){out+='<div class=tsep>'+fmt(x.ts)+'</div>';}
   if(x.ts)last=x.ts;
-  const sys=(x.type==='10002')||/撤回了一条消息$/.test(x.content||'');
-  if(sys){out+='<div class=sys>'+esc(x.content)+'</div>';return;}
+  const sys=(x.type==='10002')||(x.type==='system')||/撤回了一条消息$/.test(x.content||'');
+  if(sys){const sm=_mjson(x.raw);out+='<div class=sys>'+esc(sm.text||x.content)+'</div>';return;}
   const dir=x.direction==='out'?'out':'in';
   const tag=(opt.platform&&x.platform)?' <span class=badge>'+esc(x.platform)+'</span>':'';
   const name=dir==='in'?'<span class=s>'+esc(x.sender)+tag+'</span>':'';
-  out+='<div class="m '+dir+'">'+name+'<div class=bub>'+esc(x.content)+'</div><span class=t>'+fmt(x.ts)+'</span></div>';
+  const rich=RICHKINDS.has(x.type)?renderKind(x):null;
+  const body=(rich!=null)?rich:('<div class=bub>'+esc(x.content)+'</div>');
+  out+='<div class="m '+dir+'">'+name+body+'<span class=t>'+fmt(x.ts)+'</span></div>';
  });
  return out||'(无消息)';}
 async function loadConvs(){const c=await E('/conversations');c.forEach(x=>window.NAMES[x.id]=x.name||x.chat_id);
@@ -682,6 +739,7 @@ function toggleSettings(){const s=document.getElementById('settings');
 async function loadSettings(){
  {const cfg=autoCfg();document.getElementById('autosend_on').checked=cfg.on;document.getElementById('autosend_secs').value=cfg.secs;}
  {const t=localStorage.getItem('amr_theme')||'system';const el=document.querySelector('input[name=theme][value="'+t+'"]');if(el)el.checked=true;}
+ {const b=await E('/backends');if(b){document.getElementById('be_fullwechat').value=b.fullwechat||'';document.getElementById('be_powerdata').value=b.powerdata||'';}}
  const prof=await E('/self-profile');document.getElementById('selfprofile').value=(prof&&prof.profile)||'';
  const d=await E('/self');
  document.getElementById('self_reg').innerHTML=(d.registered||[]).map(s=>
@@ -709,6 +767,9 @@ async function markSelf(pid,name){if(!confirm('把「'+name+'」标为你自己?
 async function addSelf(kind,identifier,btn){const persona=btn.parentNode.querySelector('select').value;
  await P('/self',{kind,identifier,persona});toast('已纳入「我的」');loadSettings()}
 async function setPersona(kind,identifier,persona){await P('/self/persona',{kind,identifier,persona});toast('persona 已改: '+persona)}
+async function saveBackend(tool){const url=document.getElementById('be_'+tool).value.trim();
+ const r=await P('/backend',{tool,url});
+ if(r.ok)toast(tool+' 地址已存：'+(r.url||'(空→默认)')+'（下次拉取生效，poll 自动）');else alert('保存失败：'+(r.error||'未知'));}
 function saveAuto(){localStorage.setItem('amr_autosend',document.getElementById('autosend_on').checked?'1':'0');
  localStorage.setItem('amr_autosend_secs',String(Math.max(1,parseInt(document.getElementById('autosend_secs').value,10)||5)));
  toast('发送设置已存');}

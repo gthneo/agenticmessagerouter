@@ -15,7 +15,25 @@ from urllib.parse import quote
 
 from .. import ingest
 
-DEFAULT_URL = os.environ.get("AGENT_WECHAT_URL", "http://192.168.31.178:6174")
+def _default_url():
+    """fullwechat 后端地址，优先级：**设置文件 `~/.config/jl/fullwechat_url`（UI 可写，支持
+    FQDN/域名如 http://wx.example.com:6174，权威）> env `AGENT_WECHAT_URL` > 内置默认**。
+    设置文件优先于 env，使 Web 设置界面成为权威源（切后端/迁机只改设置即可，env 是部署兜底）。
+    每次 adapter 实例化时读，故改设置后下次调用即生效(无需重启/改代码)。"""
+    try:
+        with open(os.path.expanduser("~/.config/jl/fullwechat_url"), encoding="utf-8") as f:
+            v = f.read().strip()
+            if v:
+                return v.rstrip("/")
+    except OSError:
+        pass
+    u = os.environ.get("AGENT_WECHAT_URL")
+    if u:
+        return u.rstrip("/")
+    return "http://192.168.31.178:6174"
+
+
+DEFAULT_URL = _default_url()
 SOURCE = "fullwx"
 
 # WeChat message-type → human placeholder. Non-text messages carry raw XML in
@@ -130,8 +148,8 @@ class FullWechatAdapter(ingest.IngestAdapter):
     tool = "fullwechat"
     can_send = True
 
-    def __init__(self, url=DEFAULT_URL, token=None):
-        self.url = url.rstrip("/")
+    def __init__(self, url=None, token=None):
+        self.url = (url or _default_url()).rstrip("/")  # 每次实例化读最新地址(设置可改 FQDN)
         self.token = token or _token()
 
     def _get(self, path):
