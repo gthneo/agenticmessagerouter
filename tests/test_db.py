@@ -281,3 +281,28 @@ def test_canon_strips_wxid_device_suffix(conn):
     db.add_self_identity(conn, "wechat", "wxid_me0001_e96b")
     assert db.is_self(conn, "wechat", "wxid_me0001")          # base form (as seen in a contact)
     assert db.is_self(conn, "wechat", "wxid_me0001_d898")     # another instance's suffix
+
+
+def test_migrate_types_to_kinds_dry_run_then_apply():
+    import jl.db as d
+    conn = d.connect(":memory:"); d.init_db(conn)
+    conn.execute("INSERT INTO accounts(account_id,platform,created_at) VALUES(1,'wechat',0)")
+    conn.execute("INSERT INTO conversations(account_id,platform,chat_id,created_at,updated_at) VALUES(1,'wechat','c',0,0)")
+    cid = conn.execute("SELECT id FROM conversations").fetchone()[0]
+    for i, t in enumerate(["34", "10002", "49", "text", "3"]):  # voice, system, appmsg, text, image
+        conn.execute("INSERT INTO messages(conversation_id,account_id,platform,msg_key,ts,type,recorded_at) "
+                     "VALUES(?,1,'wechat',?,?,?,0)", (cid, f"k{i}", i, t))
+    conn.commit()
+    dry = d.migrate_types_to_kinds(conn, dry_run=True)
+    assert dry["changed"] == 3                       # 34,10002,3 (not 49/text)
+    assert dry["by_kind"]["voice"] == 1 and dry["by_kind"]["system"] == 1 and dry["by_kind"]["image"] == 1
+    assert dry["skipped_appmsg49"] == 1
+    # dry-run did not write
+    assert conn.execute("SELECT COUNT(*) FROM messages WHERE type='34'").fetchone()[0] == 1
+    app = d.migrate_types_to_kinds(conn, dry_run=False)
+    assert app["changed"] == 3
+    assert conn.execute("SELECT type FROM messages WHERE msg_key='k0'").fetchone()[0] == "voice"
+    assert conn.execute("SELECT type FROM messages WHERE msg_key='k1'").fetchone()[0] == "system"
+    assert conn.execute("SELECT type FROM messages WHERE msg_key='k2'").fetchone()[0] == "49"   # 49 untouched
+    # idempotent: second run changes nothing
+    assert d.migrate_types_to_kinds(conn, dry_run=True)["changed"] == 0

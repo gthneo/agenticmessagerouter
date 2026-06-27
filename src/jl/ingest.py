@@ -56,6 +56,50 @@ def msg_key(*, source: str, stable_id: str | None,
     return "h:" + content_hash(ts=ts, sender=sender, content=content)
 
 
+# Message Channel 规范化契约 v1 (docs/superpowers/specs/2026-06-26-message-canonical-contract-v1.md):
+# kind → 它的结构化子对象在信封里的键名。子对象原样进 MsgRecord.raw，供 UI 按 kind 富渲。
+_KIND_SUBOBJ = {
+    "link": "link", "file": "file", "quote": "quote",
+    "miniprogram": "miniprogram", "chat_history": "chat_history",
+    "location": "location", "system": "system",
+    "image": "media", "voice": "media", "video": "media", "sticker": "media",
+    "transfer": "payment", "red_packet": "payment",
+}
+
+
+def is_canonical(msg: dict) -> bool:
+    """True if a backend message is already a canonical envelope (schema message.canonical/*
+    或 至少带 kind+text)。非 canonical(如 fullwechat 原始 dict 含 localId/无 kind) → False。"""
+    if not isinstance(msg, dict):
+        return False
+    if str(msg.get("schema", "")).startswith("message.canonical/"):
+        return True
+    return "kind" in msg and "text" in msg
+
+
+def from_canonical(env: dict, *, source: str | None = None) -> MsgRecord:
+    """薄映射：Message Channel canonical 信封 → MsgRecord。kind→type、text→content、
+    该 kind 的结构化子对象→raw(UI 据此富渲)、media.ref→media_ref。后端未实现前不会走到这里
+    (is_canonical 把关)，所以这是"后端吐 canonical 即生效"的消费点。source 默认取 channel。"""
+    kind = env.get("kind") or "text"
+    ts = int(env.get("ts") or 0)
+    sender = env.get("sender", "") or ""
+    text = env.get("text", "") or ""
+    sub = env.get(_KIND_SUBOBJ.get(kind, "\0"), {})
+    if not isinstance(sub, dict):
+        sub = {}
+    media = env.get("media") if isinstance(env.get("media"), dict) else {}
+    return MsgRecord(
+        msg_key=msg_key(source=source or env.get("channel", "msg"),
+                        stable_id=env.get("msg_id") or None,
+                        ts=ts, sender=sender, content=text),
+        ts=ts, content=text, sender=sender, sender_id=env.get("sender_id", "") or "",
+        direction="out" if env.get("direction") == "out" else "in",
+        type=kind, media_ref=(media or {}).get("ref", "") or "",
+        is_mentioned=bool(env.get("is_mentioned")), raw=sub or {},
+    )
+
+
 def blob_path(sha256: str, root: str = "") -> str:
     """Content-addressed path, sharded by the first two hex chars."""
     rel = f"blobs/{sha256[:2]}/{sha256}"

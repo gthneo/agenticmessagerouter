@@ -54,6 +54,8 @@ def route(args):
             "platform": _opt_value(args, "--channel"),
             "include_accounts": "--all" in args,
         })
+    if a == "migrate-kinds":
+        return ("migrate_kinds", {"confirm": "--confirm" in args})
     if a == "ignite":
         ch = args[1] if len(args) > 1 and not args[1].startswith("--") else "wechat"
         return ("ignite", {"channel": ch})
@@ -208,6 +210,21 @@ def cmd_reset(conn, params):
     db.reset_store(conn, dry_run=False, platform=params["platform"],
                    include_accounts=params["include_accounts"])
     print("\n✅ 已清除。可重新点火 (jl ignite — B 阶段) 灌入。")
+
+
+def cmd_migrate_kinds(conn, params):
+    """迁移闸: messages.type 数字串 → canonical kind (保守集)。dry-run → --confirm。"""
+    r = db.migrate_types_to_kinds(conn, dry_run=True)
+    print(f"\n🧬 type→kind 迁移 — 将改 {r['changed']} 条:")
+    for k, v in (r["by_kind"] or {}).items():
+        print(f"  {k}: {v}")
+    print(f"  (49 appmsg {r['skipped_appmsg49']} 条不动 — 子类需后端 canonical / re-poll)")
+    if not params["confirm"]:
+        print("\n这是 dry-run。确认后加 --confirm 写入 (幂等，建议先备份 jl.db)。"
+              "\n注意: 旧后端 re-poll 会把数字 type 覆盖回来 — 真正持久要等后端吐 canonical。")
+        return
+    r2 = db.migrate_types_to_kinds(conn, dry_run=False)
+    print(f"\n✅ 已迁移 {r2['changed']} 条 type→kind。")
 
 
 def _ensure_account(conn, account_id, platform, label, host=""):
@@ -456,6 +473,8 @@ def main(argv=None):
         cmd_detail(conn, ctx, params["name"])
     elif command == "reset":
         cmd_reset(conn, params)
+    elif command == "migrate_kinds":
+        cmd_migrate_kinds(conn, params)
     elif command == "ignite":
         ctx["channel"] = params["channel"]; cmd_ignite(conn, ctx)
     elif command == "poll":

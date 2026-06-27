@@ -126,6 +126,10 @@ def map_chat(chat):
 
 
 def map_message(msg):
+    # 后端已按 Message Channel 契约吐 canonical 信封 → 薄映射 (kind/结构化/direction 都由后端给)。
+    # 否则走下面的原始 fullwechat 解析(向前兼容，后端未升级时不变)。
+    if ingest.is_canonical(msg):
+        return ingest.from_canonical(msg, source=SOURCE)
     local = msg.get("localId") or 0
     stable = str(local) if local else "s" + str(msg.get("serverId") or "")
     return ingest.MsgRecord(

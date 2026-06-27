@@ -920,6 +920,35 @@ def apply_self_directions(conn):
     return cur.rowcount
 
 
+# 迁移闸：messages.type 从微信原始数字串 → canonical kind（契约 message.canonical/1）。
+# 仅映 AMR 单凭顶层 type 数字即可无歧义判定的；49(appmsg) 的子类(link/file/quote…)需解 XML
+# = 后端的活，这里**不动**(等后端吐 canonical 或 re-poll 覆盖)。保守、幂等。
+_TYPE_TO_KIND = {
+    "3": "image", "34": "voice", "43": "video", "47": "sticker", "48": "location",
+    "62": "video", "2000": "transfer", "2001": "red_packet", "10002": "system",
+}
+
+
+def migrate_types_to_kinds(conn, *, dry_run=True):
+    """把 messages.type 的微信原始数字串改成 canonical kind（保守集，见 _TYPE_TO_KIND）。
+    返回 {"changed": n, "by_kind": {...}, "skipped_appmsg49": m}. dry_run=True 只统计不写。
+    幂等：已是 kind 的行不在映射表里、不受影响。49 与未知一律不动。"""
+    by_kind, changed = {}, 0
+    for num, kind in _TYPE_TO_KIND.items():
+        n = conn.execute("SELECT COUNT(*) FROM messages WHERE type=?", (num,)).fetchone()[0]
+        if n:
+            by_kind[kind] = by_kind.get(kind, 0) + n
+            changed += n
+    skipped49 = conn.execute("SELECT COUNT(*) FROM messages WHERE type='49'").fetchone()[0]
+    if not dry_run and changed:
+        for num, kind in _TYPE_TO_KIND.items():
+            conn.execute("UPDATE messages SET type=? WHERE type=?", (kind, num))
+        log_event(conn, kind="migrate_kinds", actor="user",
+                  detail={"changed": changed, "by_kind": by_kind})
+        conn.commit()
+    return {"changed": changed, "by_kind": by_kind, "skipped_appmsg49": skipped49}
+
+
 def reunify(conn, *, reset=False):
     """启动/复位归一. reset=True first clears AUTO-linked conversations (keeps human-confirmed
     links — never destroys human work), then re-links by strong signal. Returns stats."""
