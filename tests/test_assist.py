@@ -274,3 +274,49 @@ def test_save_then_load_self_profile(tmp_path, monkeypatch):
     monkeypatch.setenv("AMR_SELF_PROFILE", str(tmp_path / "sp.md"))
     assist.save_self_profile("性格核心词")
     assert assist.load_self_profile() == "性格核心词"
+
+
+# ---- voice ASR sweep (LLM-optional) ----------------------------------------
+
+def _seed_voice_media(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="self")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                 chat_id="wxid_test_zhang", name="张三")
+    mid = conn.execute("INSERT INTO messages (conversation_id, account_id, platform, "
+                       "msg_key, ts, type, recorded_at) VALUES (?,1,'wechat','v1',1,'voice',1)",
+                       (cid,)).lastrowid
+    return db.add_media(conn, message_id=mid, kind="voice", source_ref="https://x/v.silk")
+
+
+def test_transcribe_sweep_writes_transcript(monkeypatch):
+    from jl import asr
+    conn = db.connect(":memory:"); db.init_db(conn)
+    media_id = _seed_voice_media(conn)
+    monkeypatch.setattr(asr, "available", lambda: True)
+    monkeypatch.setattr(asr, "transcribe",
+                        lambda audio, **kw: asr.ASRResult(text="转写结果", ok=True))
+    res = assist.transcribe_sweep(conn, fetch=lambda ref: b"audiobytes")
+    assert res["transcribed"] == 1 and res["skipped"] == 0
+    row = conn.execute("SELECT transcript FROM media WHERE id=?", (media_id,)).fetchone()
+    assert row["transcript"] == "转写结果"
+    assert db.pending_voice_media(conn) == []
+
+
+def test_transcribe_sweep_no_provider_is_noop(monkeypatch):
+    from jl import asr
+    conn = db.connect(":memory:"); db.init_db(conn)
+    media_id = _seed_voice_media(conn)
+    monkeypatch.setattr(asr, "available", lambda: False)
+    res = assist.transcribe_sweep(conn, fetch=lambda ref: b"audiobytes")
+    assert res == {"transcribed": 0, "skipped": 0}
+    row = conn.execute("SELECT transcript FROM media WHERE id=?", (media_id,)).fetchone()
+    assert row["transcript"] == ""          # nothing written — degrades to [语音]
+
+
+def test_transcribe_sweep_skips_unfetchable(monkeypatch):
+    from jl import asr
+    conn = db.connect(":memory:"); db.init_db(conn)
+    _seed_voice_media(conn)
+    monkeypatch.setattr(asr, "available", lambda: True)
+    res = assist.transcribe_sweep(conn, fetch=lambda ref: b"")   # fetch yields nothing
+    assert res == {"transcribed": 0, "skipped": 1}

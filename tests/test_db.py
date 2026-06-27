@@ -306,3 +306,78 @@ def test_migrate_types_to_kinds_dry_run_then_apply():
     assert conn.execute("SELECT type FROM messages WHERE msg_key='k2'").fetchone()[0] == "49"   # 49 untouched
     # idempotent: second run changes nothing
     assert d.migrate_types_to_kinds(conn, dry_run=True)["changed"] == 0
+
+
+# ----- media (voice ASR) ----------------------------------------------------
+
+def _voice_conv(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="self")
+    cid = db.upsert_conversation(conn, account_id=1, platform="wechat",
+                                 chat_id="wxid_test_zhang", name="张三")
+    return cid
+
+
+def test_add_and_pending_voice_media(conn):
+    cid = _voice_conv(conn)
+    mid = conn.execute("INSERT INTO messages (conversation_id, account_id, platform, "
+                       "msg_key, ts, type, recorded_at) VALUES (?,1,'wechat','k1',1,'voice',1)",
+                       (cid,)).lastrowid
+    media_id = db.add_media(conn, message_id=mid, kind="voice",
+                            source_ref="https://x/v.silk", mime="audio/silk")
+    pend = db.pending_voice_media(conn)
+    assert len(pend) == 1
+    assert pend[0]["id"] == media_id
+    assert pend[0]["source_ref"] == "https://x/v.silk"
+    assert pend[0]["mime"] == "audio/silk"
+
+
+def test_pending_voice_media_excludes_transcribed_and_refless(conn):
+    cid = _voice_conv(conn)
+    mid = conn.execute("INSERT INTO messages (conversation_id, account_id, platform, "
+                       "msg_key, ts, type, recorded_at) VALUES (?,1,'wechat','k1',1,'voice',1)",
+                       (cid,)).lastrowid
+    done = db.add_media(conn, message_id=mid, kind="voice", source_ref="https://x/a")
+    db.set_media_transcript(conn, done, "已转写")          # has transcript → excluded
+    db.add_media(conn, message_id=mid, kind="voice", source_ref="")  # no ref → excluded
+    assert db.pending_voice_media(conn) == []
+
+
+def test_set_media_transcript_sets_status_and_clears_pending(conn):
+    cid = _voice_conv(conn)
+    mid = conn.execute("INSERT INTO messages (conversation_id, account_id, platform, "
+                       "msg_key, ts, type, recorded_at) VALUES (?,1,'wechat','k1',1,'voice',1)",
+                       (cid,)).lastrowid
+    media_id = db.add_media(conn, message_id=mid, kind="voice", source_ref="https://x/a")
+    db.set_media_transcript(conn, media_id, "你好世界")
+    row = conn.execute("SELECT transcript, status FROM media WHERE id=?", (media_id,)).fetchone()
+    assert row["transcript"] == "你好世界" and row["status"] == "done"
+    assert db.pending_voice_media(conn) == []
+
+
+def test_ingest_voice_with_ref_creates_media_row(conn):
+    from jl import ingest
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="self")
+    conv = ingest.ConvRecord(chat_id="wxid_test_zhang", name="张三")
+    rec = ingest.from_canonical(
+        {"channel": "wechat", "kind": "voice", "text": "[语音]", "ts": 5, "sender": "张三",
+         "msg_id": "v1", "media": {"placeholder": "[语音]", "ref": "https://x/v.silk",
+                                   "mime": "audio/silk"}})
+    cid, ins = db.ingest_records(conn, account_id=1, platform="wechat", conv=conv, msgs=[rec])
+    assert ins == 1
+    pend = db.pending_voice_media(conn)
+    assert len(pend) == 1
+    assert pend[0]["source_ref"] == "https://x/v.silk"
+    assert pend[0]["mime"] == "audio/silk"
+    m = conn.execute("SELECT kind FROM media WHERE id=?", (pend[0]["id"],)).fetchone()
+    assert m["kind"] == "voice"
+
+
+def test_ingest_voice_without_ref_creates_no_media(conn):
+    from jl import ingest
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="self")
+    conv = ingest.ConvRecord(chat_id="wxid_test_zhang", name="张三")
+    rec = ingest.from_canonical(
+        {"channel": "wechat", "kind": "voice", "text": "[语音]", "ts": 5, "sender": "张三",
+         "msg_id": "v2", "media": {"placeholder": "[语音]"}})   # no ref
+    db.ingest_records(conn, account_id=1, platform="wechat", conv=conv, msgs=[rec])
+    assert conn.execute("SELECT COUNT(*) FROM media").fetchone()[0] == 0

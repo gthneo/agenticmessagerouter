@@ -568,6 +568,11 @@ def insert_messages(conn, conversation_id, records):
              json.dumps(r.raw, ensure_ascii=False), now),
         )
         inserted += cur.rowcount
+        # voice message carrying a media.ref → create a (待转写) media row for ASR.
+        # Only for newly-inserted rows (rowcount==1); dedup-skipped (0) are left alone.
+        if cur.rowcount and r.type == "voice" and (r.raw or {}).get("ref"):
+            add_media(conn, message_id=cur.lastrowid, kind="voice",
+                      source_ref=r.raw["ref"], mime=(r.raw or {}).get("mime", ""))
         if r.ts > max_ts:
             max_ts = r.ts
     if max_ts:
@@ -592,6 +597,30 @@ def ingest_records(conn, *, account_id, platform, conv, msgs):
         set_muted(conn, cid, True)
     inserted = insert_messages(conn, cid, msgs) if msgs else 0
     return cid, inserted
+
+
+# ----- media (voice/image/file blobs + ASR transcripts) ---------------------
+
+def add_media(conn, *, message_id, kind, source_ref="", mime="", status="pending"):
+    """Create a media row for a message (e.g. voice audio ref from canonical media.ref)."""
+    cur = conn.execute(
+        "INSERT INTO media (message_id, kind, source_ref, mime, status) VALUES (?,?,?,?,?)",
+        (message_id, kind, source_ref, mime, status))
+    conn.commit()
+    return cur.lastrowid
+
+
+def pending_voice_media(conn, limit=20):
+    """Voice media with a fetchable source_ref but no transcript yet → 待转写。"""
+    return [dict(r) for r in conn.execute(
+        "SELECT id, message_id, source_ref, mime FROM media "
+        "WHERE kind='voice' AND transcript='' AND source_ref!='' ORDER BY id DESC LIMIT ?",
+        (limit,)).fetchall()]
+
+
+def set_media_transcript(conn, media_id, text, status="done"):
+    conn.execute("UPDATE media SET transcript=?, status=? WHERE id=?", (text, status, media_id))
+    conn.commit()
 
 
 def search_messages(conn, query, *, limit=50, account_id=None):

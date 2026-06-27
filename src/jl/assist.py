@@ -297,6 +297,41 @@ def proactive_sweep(conn, *, llm_complete=_llm.complete):
     return {"drafted": drafted, "missing_channel": missing}
 
 
+# ---- voice ASR sweep (LLM-optional: no ASR provider → graceful no-op) --------
+
+def _http_fetch(ref):
+    import urllib.request
+    if not ref.startswith("http"):
+        return b""          # 非 http ref（后端本地/CDN+aeskey）→ 取流另说，跳过
+    try:
+        with urllib.request.urlopen(ref, timeout=30) as r:
+            return r.read()
+    except Exception:
+        return b""
+
+
+def transcribe_sweep(conn, *, fetch=None):
+    """转写待处理语音 media → media.transcript。LLM-optional：无 ASR provider → 直接返回 0。
+    fetch(source_ref)->bytes 可注入(测试用)。"""
+    from . import asr
+    if not asr.available():
+        return {"transcribed": 0, "skipped": 0}
+    fetch = fetch or _http_fetch
+    done = skipped = 0
+    for m in db.pending_voice_media(conn):
+        audio = fetch(m["source_ref"])
+        if not audio:
+            skipped += 1
+            continue
+        res = asr.transcribe(audio, mime=m.get("mime") or "audio/silk", conn=conn)
+        if res.ok:
+            db.set_media_transcript(conn, m["id"], res.text)
+            done += 1
+        else:
+            skipped += 1
+    return {"transcribed": done, "skipped": skipped}
+
+
 def _latest_direction(conn, conversation_id):
     r = conn.execute("SELECT direction FROM messages WHERE conversation_id=? "
                      "ORDER BY ts DESC LIMIT 1", (conversation_id,)).fetchone()

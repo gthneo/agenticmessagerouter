@@ -269,6 +269,8 @@ def cmd_poll(conn, ctx):
     while True:
         n = ingest_run.ignite(conn, FullWechatAdapter(), account_id=aid, actor="poll")
         db.apply_self_directions(conn)  # 回灌的自我发出消息标 direction=out (右绿气泡)
+        from . import assist as _assist
+        _assist.transcribe_sweep(conn)   # 语音转写(LLM-optional·无ASR则空转)
         print(f"  [{_t.strftime('%H:%M:%S')}] +{n}")
         _t.sleep(interval)
 

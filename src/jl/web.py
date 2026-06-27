@@ -23,9 +23,10 @@ def api_conversations(conn, params):
 
 def api_messages(conn, conversation_id, limit=200):
     rows = conn.execute(
-        "SELECT * FROM messages WHERE conversation_id=? ORDER BY ts ASC LIMIT ?",
-        (conversation_id, limit),
-    ).fetchall()
+        "SELECT m.*, (SELECT transcript FROM media md WHERE md.message_id=m.id "
+        "AND md.kind='voice' AND md.transcript!='' LIMIT 1) AS transcript "
+        "FROM messages m WHERE m.conversation_id=? ORDER BY m.ts ASC LIMIT ?",
+        (conversation_id, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -628,8 +629,9 @@ function renderBubbles(m,opt){opt=opt||{};let out='',last=0;
   const dir=x.direction==='out'?'out':'in';
   const tag=(opt.platform&&x.platform)?' <span class=badge>'+esc(x.platform)+'</span>':'';
   const name=dir==='in'?'<span class=s>'+esc(x.sender)+tag+'</span>':'';
-  const rich=RICHKINDS.has(x.type)?renderKind(x):null;
-  const body=(rich!=null)?rich:('<div class=bub>'+esc(x.content)+'</div>');
+  let body;
+  if(x.type==='voice'&&x.transcript){body='<div class=bub>🎤 '+esc(x.content||'[语音]')+'<div class=qref>'+esc(x.transcript)+'</div></div>';}
+  else{const rich=RICHKINDS.has(x.type)?renderKind(x):null;body=(rich!=null)?rich:('<div class=bub>'+esc(x.content)+'</div>');}
   out+='<div class="m '+dir+'">'+name+body+'<span class=t>'+fmt(x.ts)+'</span></div>';
  });
  return out||'(无消息)';}
