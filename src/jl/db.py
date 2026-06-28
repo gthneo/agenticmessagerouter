@@ -165,6 +165,13 @@ def get_accounts(conn):
     return [dict(r) for r in rows]
 
 
+def next_account_id(conn):
+    """Smallest free account_id to allocate next = max(existing)+1 (1 if empty).
+    The 8-bit id space (0..255) is enforced by the schema CHECK, not here."""
+    row = conn.execute("SELECT MAX(account_id) AS m FROM accounts").fetchone()
+    return (row["m"] or 0) + 1
+
+
 # ----- conversations --------------------------------------------------------
 
 def upsert_conversation(conn, *, account_id, platform, chat_id, name="",
