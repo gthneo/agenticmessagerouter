@@ -13,6 +13,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from . import db
 from . import ingest
 from . import autocomms
+from .version import CONSUMES, __version__
 from . import digest as _digest
 from . import lifecycle as _lifecycle
 from . import recall as _recall
@@ -172,6 +173,13 @@ _BACKEND_FILES = {"fullwechat": "~/.config/jl/fullwechat_url",
 def api_backends(conn):
     from .channels import fullwechat, powerdata
     return {"fullwechat": fullwechat._default_url(), "powerdata": powerdata._default_url()}
+
+
+def api_version():
+    """AMR's machine-readable identity — the consumer half of the two-sided version
+    handshake. Agents / ops query this to learn AMR's version + what it consumes
+    (mirror of the backend's /api/status.version + /api/capabilities.schema)."""
+    return {"amr_version": __version__, "consumes": CONSUMES}
 
 
 def api_set_backend(conn, payload):
@@ -406,7 +414,11 @@ def make_handler(db_path):
             u = urlparse(self.path)
             params = {k: v[0] for k, v in parse_qs(u.query).items()}
             if u.path in ("/", "/index.html"):
-                return self._send(200, INDEX_HTML.encode(), "text/html; charset=utf-8")
+                return self._send(200, _index_html().encode(), "text/html; charset=utf-8")
+            if u.path == "/api/version":
+                # identity endpoint — no token (mirror of the backend's public
+                # /api/status.version); lets an Agent/ops discover AMR before auth.
+                return self._send(200, api_version())
             if not _auth_ok(self.headers, params):
                 return self._send(401, {"error": "unauthorized"})
             conn = db.connect(db_path)
@@ -1147,4 +1159,14 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
 document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
 loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();
-</script><div class=fab onclick="createMatter()">＋ 记一件事</div></body></html>"""
+</script><div class=fab onclick="createMatter()">＋ 记一件事</div>
+<div id=amrver title="AMR 版本（消费侧）· /api/version 看消费清单">AMR v__AMR_VERSION__</div>
+<style>#amrver{position:fixed;right:8px;bottom:6px;z-index:5;font-size:10px;color:var(--fg2);opacity:.55;pointer-events:none;letter-spacing:.3px}</style>
+</body></html>"""
+
+
+def _index_html():
+    """Render the inbox page with the live AMR version baked in. Single-sourced from
+    `jl.__version__`; surfaced as a subtle always-visible badge (present in every skin,
+    incl. the default 今日简报) so 用户/运维 always see which AMR they're looking at."""
+    return INDEX_HTML.replace("__AMR_VERSION__", __version__)

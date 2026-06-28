@@ -242,6 +242,26 @@ def probe_capabilities(entry, *, fetch=_get_json, timeout=10):
     return {"summary": ", ".join(parts) if parts else "(无明细)", "caps": caps}
 
 
+def probe_backend_versions(host, token, *, fetch=_get_json, timeout=5):
+    """Live-probe a fullwechat backend for BOTH version axes — the PROVIDER half of the
+    two-sided version handshake (mirror of AMR's own /api/version):
+      * software version  ← GET /api/status      `.version`
+      * contract schema    ← GET /api/capabilities `.schema`
+    Never raises (a down backend must not crash `jl account ls`): unreachable / missing
+    fields degrade to a sentinel string. Returns {"version": str, "schema": str}."""
+    def _one(path, key):
+        try:
+            resp = fetch(host, path, token, timeout=timeout)
+        except Exception:                        # noqa: BLE001 — graceful by design
+            return "unreachable"
+        if not isinstance(resp, dict):
+            return "?"
+        v = resp.get(key)
+        return str(v) if v else "?"
+    return {"version": _one("/api/status", "version"),
+            "schema": _one("/api/capabilities", "schema")}
+
+
 def onboard_entry(conn, entry, *, fetch=_get_json):
     """Process ONE registry entry up to (but not including) the write: run the
     identity preflight, and only on a match build the dry-run plan (op='set' onto

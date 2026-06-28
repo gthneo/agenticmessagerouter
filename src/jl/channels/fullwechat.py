@@ -14,6 +14,26 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 from .. import ingest
+from ..version import __version__
+
+# AMR identity headers on every outbound request, so the data PROVIDER (fullwechat)
+# can SEE which AMR version + contract is consuming it (observable in their logs).
+# This is the Agent-facing half of the two-sided version handshake (spec
+# 2026-06-28-contract-versioning-and-compat-v1).
+_AMR_HEADERS = {
+    "X-AMR-Version": __version__,
+    "X-AMR-Consumes": "message.canonical/1",
+}
+
+
+def _auth_headers(token, *, extra=None):
+    """Bearer auth + the AMR identity headers, plus any per-request extras."""
+    h = {"Authorization": "Bearer " + (token or "")}
+    h.update(_AMR_HEADERS)
+    if extra:
+        h.update(extra)
+    return h
+
 
 def _default_url():
     """fullwechat 后端地址，优先级：**设置文件 `~/.config/jl/fullwechat_url`（UI 可写，支持
@@ -158,7 +178,7 @@ class FullWechatAdapter(ingest.IngestAdapter):
 
     def _get(self, path):
         req = urllib.request.Request(self.url + path,
-                                     headers={"Authorization": "Bearer " + self.token})
+                                     headers=_auth_headers(self.token))
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read().decode("utf-8", "replace"))
 
@@ -220,8 +240,8 @@ class FullWechatAdapter(ingest.IngestAdapter):
         body = json.dumps({"chatId": chat_id, "text": text}).encode("utf-8")
         req = urllib.request.Request(self.url + "/api/messages/send", data=body,
                                      method="POST",
-                                     headers={"Authorization": "Bearer " + self.token,
-                                              "Content-Type": "application/json"})
+                                     headers=_auth_headers(self.token,
+                                              extra={"Content-Type": "application/json"}))
         try:
             # GUI 自动化发送(开会话→打字→点发送)偶尔 >30s, 给足 60s 避免把"还在发"
             # 误报成"timed out 失败"(读取路径仍 30s, 读很快)。
