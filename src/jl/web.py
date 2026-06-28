@@ -545,7 +545,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 .matter .dg{color:#a40;font-size:12px;margin:3px 0}.matter .cm{color:var(--fg3);font-size:12px}
 .matter button{margin-top:4px;padding:2px 8px;border:1px solid var(--border);background:var(--panel);border-radius:6px;cursor:pointer;font-size:12px}
 #settings{position:absolute;inset:0;background:var(--bg);overflow:auto;padding:16px 20px;z-index:5}
-#settings.hide{display:none}#main{position:relative}
+#settings.hide,#unify.hide,#prefs.hide{display:none}#main{position:relative}
 #hdr{position:relative;z-index:6;background:var(--bg)}
 #settings h2{font-size:16px;margin:18px 0 8px;border-bottom:1px solid var(--border2);padding-bottom:4px}
 #settings .row{padding:6px 0;border-bottom:1px solid var(--border2);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
