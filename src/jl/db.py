@@ -1135,3 +1135,26 @@ def token_summary(conn):
            FROM tokens"""
     ).fetchone()
     return dict(row)
+
+
+# ----- safe_phrases (双闸·闸一 话术库) ----------------------------------------
+
+def add_safe_phrase(conn, pattern, kind=""):
+    """Add an approved phrase/intent pattern to the whitelist (用户自灌). Returns id."""
+    cur = conn.execute(
+        "INSERT INTO safe_phrases (pattern, kind, created_at) VALUES (?, ?, ?)",
+        (pattern, kind, _now()))
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_safe_phrases(conn):
+    """All approved patterns, ordered by id."""
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM safe_phrases ORDER BY id").fetchall()]
+
+
+def delete_safe_phrase(conn, phrase_id):
+    """Remove an approved phrase by id."""
+    conn.execute("DELETE FROM safe_phrases WHERE id=?", (phrase_id,))
+    conn.commit()
