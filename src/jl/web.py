@@ -1087,10 +1087,12 @@ function toggleMatters(){document.body.classList.toggle('m-matters');}
 async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
  goHome()}
 window.AUTOTIMERS=window.AUTOTIMERS||{};
+window.AUTODRAFTS=window.AUTODRAFTS||{};   // cid -> draft text (never inlined into onclick → no escaping fragility)
 function _acRow(cid,inner){return '<div class=row id="acrow_'+cid+'">'+inner+'</div>';}
 async function loadAutocomms(){let cs;try{cs=await E('/auto-replies');}catch(e){cs=[];}
  const ic={shadow:'👁',arm:'⏳',human:'🙋'};
  const ksOn=(document.getElementById('ks_on')||{}).checked;
+ window.AUTODRAFTS={};
  document.getElementById('ac_list').innerHTML=(cs||[]).map(c=>{
   const cid=c.conversation_id,head=(ic[c.action]||'')+' [会话 '+cid+'] ';
   if(c.action==='human')return _acRow(cid,head+'交你回 ('+esc(c.reason||'')+')');
@@ -1098,30 +1100,31 @@ async function loadAutocomms(){let cs;try{cs=await E('/auto-replies');}catch(e){
   // action==='arm' — 监管挡: 人点击 → 倒计时否决窗 → 真发(outbox/confirm)
   if(c.action==='arm'){
    if(ksOn)return _acRow(cid,head+'🛑 全局刹车中(不可自动发):「'+esc(c.draft||'')+'」');
-   const d=esc(c.draft||'');
-   return _acRow(cid,head+'将自动发:「'+d+'」 '+
-    '<button class=go onclick="armAuto('+cid+',\''+_q(c.draft||'')+'\')">▶ 将自动发（倒计时可否决）</button>');
+   window.AUTODRAFTS[cid]=c.draft||'';   // stash draft; lookup by cid at arm/send time
+   return _acRow(cid,head+'将自动发:「'+esc(c.draft||'')+'」 '+
+    '<button class=go onclick="armAuto('+cid+')">▶ 将自动发（倒计时可否决）</button>');
   }
   return _acRow(cid,head+'「'+esc(c.draft||'')+'」');
  }).join('')
   ||'<div class=tag style=padding:6px>(暂无候选 — 所有会话默认关；去会话挡位设 observe/supervised)</div>';}
-function _q(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n');}
-function armAuto(cid,draft){
+function armAuto(cid){
  if((document.getElementById('ks_on')||{}).checked){toast('🛑 全局刹车中，不能自动发');return;}
+ const draft=window.AUTODRAFTS[cid];if(draft==null){toast('草稿已失效，请刷新');return;}
  if(window.AUTOTIMERS[cid]){clearInterval(window.AUTOTIMERS[cid]);delete window.AUTOTIMERS[cid];}
  const row=document.getElementById('acrow_'+cid);if(!row)return;
  const cfg=autoCfg();let left=Math.max(1,cfg.secs);
  const tick=()=>{row.innerHTML='⏳ <b>'+left+'s</b> 后自动发给 [会话 '+cid+']：「'+esc(draft)+'」 '+
-   '<button class=go onclick="doAutoSend('+cid+',\''+_q(draft)+'\')">立即发</button> '+
+   '<button class=go onclick="doAutoSend('+cid+')">立即发</button> '+
    '<button onclick="vetoAuto('+cid+')">✕ 否决</button>';};
  tick();
- window.AUTOTIMERS[cid]=setInterval(()=>{left--;if(left<=0){doAutoSend(cid,draft);}else{tick();}},1000);
+ window.AUTOTIMERS[cid]=setInterval(()=>{left--;if(left<=0){doAutoSend(cid);}else{tick();}},1000);
 }
 function vetoAuto(cid){if(window.AUTOTIMERS[cid]){clearInterval(window.AUTOTIMERS[cid]);delete window.AUTOTIMERS[cid];}
  toast('已否决，未发送');loadAutocomms();}
-async function doAutoSend(cid,draft){
+async function doAutoSend(cid){
  if(window.AUTOTIMERS[cid]){clearInterval(window.AUTOTIMERS[cid]);delete window.AUTOTIMERS[cid];}
  if((document.getElementById('ks_on')||{}).checked){toast('🛑 全局刹车中，已拦下自动发');loadAutocomms();return;}
+ const draft=window.AUTODRAFTS[cid];if(draft==null){toast('草稿已失效，未发送');loadAutocomms();return;}
  try{const row=await P('/outbox',{conversation_id:cid,body:draft});
   const r=await P('/outbox/confirm',{id:row.id});
   if(r.ok){toast('已自动发送 ✅');}else{toast('发送失败：'+(r.error||'未知'));}
