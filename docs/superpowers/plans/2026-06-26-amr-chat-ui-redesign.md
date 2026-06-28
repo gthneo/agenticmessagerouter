@@ -13,7 +13,7 @@
 - 消息 JSON（`GET /api/conversations/{id}/messages`，`api_messages` 用 `SELECT *`）含字段：`sender`、`ts`(unix秒)、`content`、`direction`(`'in'`/`'out'`)、`type`(文本为`'text'`，其余为字符串如`'10002'`)、`platform`。
 - 既有发送相关 JS：`resetSendbar()`(:518)、`sendReply()`(:519)、`confirmSend()`(:524)、`openConv()`(:529)、`loadSuggestions()`(:548)、`useDraft()`(:553)、`goHome()`(:633)。
 - 既有 helper：`E(path)`/`P(path,body)`(fetch)、`esc(s)`、`fmt(ts)`、`toast(msg)`、`window.NAMES`(convId→名)、`window.CURCONV`、`window.SUG`(草稿id→正文)。
-- 部署：`sshpass -p dbos-miner scp src/jl/web.py dbos-user@192.168.31.178:/home/dbos-user/amr/jl/web.py` 然后 `ssh dbos-user@192.168.31.178 'systemctl --user restart amr-web'`。收件箱 URL：`http://192.168.31.178:8088/?token=cd1d80fffa2389f40fe1eb0994dc30c5`。
+- 部署：`scp src/jl/web.py "$AMR_DEPLOY_DEST"   # SSH 凭据走 ~/.ssh/config / ssh-agent，禁止明文密码` 然后 `ssh <AMR_HOST> 'systemctl --user restart amr-web'`。收件箱 URL：`http://<AMR_HOST>:8088/?token=$JL_WEB_TOKEN`（token 走环境/本地文件，勿写明文）。
 - 浏览器验证：Claude-in-Chrome `navigate` 打开上面 URL → `javascript_tool` 执行检查脚本 → 断言返回 JSON。何峰博会话 id 在运行时取（见各任务），修伟=conv 195。
 
 **全局约束：** DRY（气泡渲染抽一个 `renderBubbles` 复用）、YAGNI（不做 1c 自治、不做头像）、公开仓库无 PII（不写真实联系人名进代码/注释）、每个 Task 一次提交。
@@ -96,7 +96,7 @@ cd /Users/neo/as/agenticmessagerouter && .venv/bin/python -m pytest -q
 Expected: `276 passed`（后端未动，纯防回归）。
 
 ```bash
-sshpass -p dbos-miner scp src/jl/web.py dbos-user@192.168.31.178:/home/dbos-user/amr/jl/web.py
+scp src/jl/web.py "$AMR_DEPLOY_DEST"   # SSH 凭据走 ~/.ssh/config / ssh-agent，禁止明文密码
 ssh dbos-user@192.168.31.178 'systemctl --user restart amr-web && sleep 1 && systemctl --user is-active amr-web'
 ```
 Expected: `active`
@@ -214,7 +214,7 @@ Expected: 无输出（三个旧函数名已全部移除/替换）。若有残留
 
 ```bash
 .venv/bin/python -m pytest -q   # Expected: 276 passed
-sshpass -p dbos-miner scp src/jl/web.py dbos-user@192.168.31.178:/home/dbos-user/amr/jl/web.py
+scp src/jl/web.py "$AMR_DEPLOY_DEST"   # SSH 凭据走 ~/.ssh/config / ssh-agent，禁止明文密码
 ssh dbos-user@192.168.31.178 'systemctl --user restart amr-web && sleep 1 && systemctl --user is-active amr-web'   # active
 ```
 
@@ -283,7 +283,7 @@ function saveAuto(){localStorage.setItem('amr_autosend',document.getElementById(
 - [ ] **Step 3: 部署 + 浏览器验证（关掉自动发 → 倒数条变手动确认）**
 
 ```bash
-sshpass -p dbos-miner scp src/jl/web.py dbos-user@192.168.31.178:/home/dbos-user/amr/jl/web.py
+scp src/jl/web.py "$AMR_DEPLOY_DEST"   # SSH 凭据走 ~/.ssh/config / ssh-agent，禁止明文密码
 ssh dbos-user@192.168.31.178 'systemctl --user restart amr-web && sleep 1 && systemctl --user is-active amr-web'   # active
 ```
 
@@ -366,7 +366,7 @@ function toggleMatters(){document.body.classList.toggle('m-matters');}
 - [ ] **Step 4: 部署 + 移动视口浏览器验证（两级导航）**
 
 ```bash
-sshpass -p dbos-miner scp src/jl/web.py dbos-user@192.168.31.178:/home/dbos-user/amr/jl/web.py
+scp src/jl/web.py "$AMR_DEPLOY_DEST"   # SSH 凭据走 ~/.ssh/config / ssh-agent，禁止明文密码
 ssh dbos-user@192.168.31.178 'systemctl --user restart amr-web && sleep 1 && systemctl --user is-active amr-web'   # active
 ```
 
