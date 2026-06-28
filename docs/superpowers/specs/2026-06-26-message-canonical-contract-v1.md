@@ -72,7 +72,7 @@
 |---|---|---|
 | `link` | `link` | `{title, url, source?}` — `source` = 公众号/站点名（`sourcedisplayname`）。 |
 | `file` | `file` | `{name, ext?, size?}` — `size` 字节数。 |
-| `quote` | `quote` | `{author, text, refKind, refText}` — `refKind` = **被引消息的 canonical kind**；`refText` = 被引内容的 display text。`text` 顶层字段 = 本次回复正文。 |
+| `quote` | `quote` | `{author, refKind, refText}` — `author` = 被引消息作者显示名；`refKind` = **被引消息的 canonical kind**；`refText` = 被引内容的 display text。**回复正文走顶层 `text`，quote 子对象内不再放 `text`**（同名易混；AMR UI 只读 `author`/`refText`，顶层 `text` 当正文）。 |
 | `miniprogram` | `miniprogram` | `{title, source?, url?}` — `source` = 小程序名（`sourcedisplayname`）。 |
 | `chat_history` | `chat_history` | `{title, items?}` — 合并转发；`items` = `[{author, kind, text}]`（可选；解不动就只给 `title`）。 |
 | `location` | `location` | `{label?, poi?, lat?, lng?}` — `label` 地名，`poi` POI 名。坐标可省。 |
@@ -81,6 +81,10 @@
 | `payment` | `transfer` `red_packet` | `{amount?, memo?, stage?}` — `amount` 如 `"¥100.00"`；`stage` = 收发阶段（survey: paysubtype 1/3/4/5/7）。 |
 
 > 不在表内的字段一律不要求。后端只 emit 它解得出的子对象；缺失即「这一维我没解」，AMR 不报错。
+
+> **口径（2026-06-28 实现后裁定，AMR 钦定）**：
+> - **②长尾子对象字段名不阻塞上线**。`transfer`/`red_packet`/名片(42)/位置(48) 当前 AMR UI **退回纯文本气泡吃 `text` 地板**（payment 暂未做卡片），故 XML 字段名按现有就近映射先发即可，**不为真机抽样而阻塞**。唯一例外：**`payment.amount`（钱）**——做金额卡前，后端对 `feedesc`/`scenetext` 做一次真机抽样核对，确认金额字段对，再让 AMR 信它去显示/染色；名片/位置低风险，随手优化、不专门排期。
+> - **③`system.actor` 是增量不是闸**。AMR UI 居中灰条只显示 `system.text`（人话地板），**不读 `actor` 也能正常渲**，故 `actor` 留 `None` 可接受、不阻塞。但 `actor` 对 jl 的**关系加权染色**有真实价值（「谁撤回/谁拍了谁」=互动信号）：**`pat.actor` 顺手填**（`fromusername` 现成、近零成本、拍一拍=高频亲密信号），`revoke.actor`（群里要从 `replacemsg` 抽，成本高）可缓到染色真正用它时再补。
 
 ### 2.3 语音 / ASR 边界（后端 vs AMR — 重要）
 
