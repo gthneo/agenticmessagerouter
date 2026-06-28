@@ -575,15 +575,24 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  #skin-digest .grid{grid-template-columns:1fr;padding:0 12px 18px}
  #skin-digest .gate{margin:8px 12px 12px}
 }
+#axisbar{display:flex;gap:4px;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--panel)}
+#axisbar .axt{font-size:13px;padding:5px 16px;border-radius:8px;cursor:pointer;color:var(--fg2)}
+#axisbar .axt.on{background:var(--bg);font-weight:700;color:var(--fg)}
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
 <div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
  皮肤
  <select id=skinsel onchange="setSkin(this.value)">
   <option value=digest>今日简报</option>
   <option value=inbox>收件箱(三栏)</option>
+  <option value=dual>会话双轴</option>
  </select>
 </div>
 <div id=skin-digest style="display:none;flex:1;width:100%;height:100vh;overflow:auto"></div>
+<div id=skin-dual style="display:none;flex:1;width:100%;height:100vh;overflow:auto">
+ <div id=axisbar><span class=axt data-axis=people onclick="switchAxis('people')">👥 人视图</span><span class=axt data-axis=matters onclick="switchAxis('matters')">🗂 事视图</span></div>
+ <div id=axis-people></div>
+ <div id=axis-matters></div>
+</div>
 <div id=mtab>
  <div class=mt data-skin=digest onclick="setSkin('digest')"><span>📋</span>简报</div>
  <div class=mt data-skin=inbox onclick="setSkin('inbox')"><span>👥</span>人</div>
@@ -647,11 +656,21 @@ function curSkin(){return localStorage.getItem('amr_skin')||'digest';}
 function applySkin(){const s=curSkin();
  const dig=document.getElementById('skin-digest');
  const inboxEls=['side','main','right'].map(id=>document.getElementById(id)).filter(Boolean);
- if(s==='digest'){dig.style.display='block';inboxEls.forEach(e=>e.style.display='none');loadDigest();}
- else{dig.style.display='none';inboxEls.forEach(e=>e.style.display='');}
+ const dual=document.getElementById('skin-dual');
+ dig.style.display = s==='digest'?'block':'none';
+ dual.style.display = s==='dual'?'flex':'none';
+ inboxEls.forEach(e=>e.style.display = s==='inbox'?'':'none');
+ if(s==='digest')loadDigest();
+ if(s==='dual')loadDual();
  const sel=document.getElementById('skinsel');if(sel)sel.value=s;
  document.querySelectorAll('#mtab .mt').forEach(t=>t.classList.toggle('on',t.dataset.skin===s));}
 function setSkin(s){localStorage.setItem('amr_skin',s);applySkin();}
+function loadDual(){switchAxis(localStorage.getItem('amr_axis')||'people');}
+function switchAxis(a){localStorage.setItem('amr_axis',a);
+ document.querySelectorAll('#axisbar .axt').forEach(t=>t.classList.toggle('on',t.dataset.axis===a));
+ document.getElementById('axis-people').style.display=a==='people'?'block':'none';
+ document.getElementById('axis-matters').style.display=a==='matters'?'block':'none';
+ /* Task 2/3 渲染挂这里 */}
 async function loadDigest(){
  let d; try{d=await E('/digest');}catch(e){d={reports:{},gate:[]};}
  document.getElementById('skin-digest').innerHTML=renderDigest(d);}
