@@ -595,7 +595,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  </select>
 </div>
 <div id=skin-digest style="display:none;flex:1;width:100%;height:100vh;overflow:auto"></div>
-<div id=skin-dual style="display:none;flex:1;width:100%;height:100vh;overflow:auto">
+<div id=skin-dual style="display:none;flex-direction:column;flex:1;width:100%;height:100vh;overflow:auto">
  <div id=axisbar><span class=axt data-axis=people onclick="switchAxis('people')">👥 人视图</span><span class=axt data-axis=matters onclick="switchAxis('matters')">🗂 事视图</span></div>
  <div id=axis-people></div>
  <div id=axis-matters></div>
