@@ -834,7 +834,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  <div class=sec>👤 联系人</div><div id=persons></div>
  <div class=sec>📤 待发送 outbox</div><div id=outbox></div>
  <div class=sec>🔗 待确认归并</div><div id=cands></div>
- <div class=sec>💬 会话</div>
+ <div class=sec>💬 会话 <label style="float:right;font-weight:400;font-size:12px;cursor:pointer"><input type=checkbox id=show_groups onchange="loadConvs()"> 显示群</label></div>
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
 <div id=main><div id=hdr><button id=mback onclick="goHome()" style="margin-right:8px">← 列表</button>
  <button onclick="goHome()" style="margin-right:8px">← 收件箱</button>
@@ -1038,9 +1038,14 @@ function renderBubbles(m,opt){opt=opt||{};let out='',last=0;
   out+='<div class="m '+dir+'">'+name+body+'<span class=t>'+fmt(x.ts)+'</span></div>';
  });
  return out||'(无消息)';}
-async function loadConvs(){const c=await E('/conversations');c.forEach(x=>window.NAMES[x.id]=x.name||x.chat_id);
+async function loadConvs(){
+ const showG=(document.getElementById('show_groups')||{}).checked;
+ let c=await E('/conversations');
+ if(showG){try{const g=await E('/conversations','muted=1');c=c.concat(g);}catch(e){}}  // 群默认静音隐藏, 勾选才拉
+ c.sort((a,b)=>(b.last_activity_at||0)-(a.last_activity_at||0));
+ c.forEach(x=>window.NAMES[x.id]=x.name||x.chat_id);
  document.getElementById('list').innerHTML=
- c.map(x=>`<div class=conv onclick="openConv(${x.id})"><div class=n>${esc(x.name||x.chat_id)}</div>
+ c.map(x=>`<div class=conv onclick="openConv(${x.id})"><div class=n>${esc(x.name||x.chat_id)} ${x.type==='group'?'<span class=badge>群</span>':''}</div>
  <div class=p>${esc(x.platform)} · ${fmt(x.last_activity_at)}</div></div>`).join('')}
 function toast(msg){const t=document.createElement('div');t.textContent=msg;
  t.style.cssText='position:fixed;bottom:20px;right:20px;background:#176;color:#fff;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:9';
@@ -1200,7 +1205,7 @@ async function connectChannel(pid,btn){const inp=btn.parentNode.querySelector('i
  const r=await P('/connect',{person_id:pid,chat_id});
  if(r.ok){toast('已连渠道 🔗 ('+r.msgs+'条)');inp.value='';loadPersons()}else{alert('连失败：'+(r.error||'未知'))}}
 function goHome(){document.getElementById('title').textContent='选择会话';window.CURCONV=null;cancelSend();document.body.classList.remove('m-chat','m-matters');
- document.getElementById('settings').classList.add('hide');
+ _hidePanels();   // 关所有覆盖面板(归一/偏好/自动/设置), 否则点「收件箱」回不去(面板还盖着)
  document.getElementById('msgs').innerHTML='';document.getElementById('suggest').innerHTML='';
  document.getElementById('matters').innerHTML='';
  loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()}
