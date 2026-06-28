@@ -227,7 +227,9 @@ class FullWechatAdapter(ingest.IngestAdapter):
                 res = json.loads(r.read().decode("utf-8", "replace"))
         except Exception as e:  # surface any transport error to the human
             return False, str(e)
-        ok, err = bool(res.get("success")), res.get("error", "") or ""
+        # 契约 §2.1: canonical 读 `ok`,过渡期回落旧端点的 `success`。
+        ok = bool(res.get("ok", res.get("success")))
+        err = res.get("error", "") or ""
         if not ok and "no action" in err.lower():
             err = "发送端选不中该会话(TA 可能不在微信近期列表)。先在微信里打开与 TA 的对话再发。"
         return ok, err

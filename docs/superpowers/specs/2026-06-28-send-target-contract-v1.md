@@ -40,8 +40,18 @@
 
 **失败（解析不到唯一会话，不猜不发）**：
 ```json
-{ "ok": false, "chat_id": "wxid_test_wangjunxi", "error": "chat_id 解析不到唯一会话（联系人不存在/多匹配）" }
+{ "ok": false, "chat_id": "wxid_test_wangjunxi", "code": "CONTACT_NOT_FOUND", "error": "wxid 不是联系人，解析不到可发会话" }
 ```
+
+### §2.1 口径定稿（2026-06-28 实现回执后 AMR 拍板）
+
+回应 fullwechat 实现回执的 5 问，**真相源定论如下**：
+
+1. **响应键名 = `ok`（canonical）**。`success` 为旧端点遗留，**过渡期后端两个都返回**（`ok` 镜像 `success`）；**AMR 改为读 `ok`（缺失时回落 `success`）**。AMR 部署"读 `ok`"版本后，后端**可去掉 `success`**（去不去都不破，但 canonical 以 `ok` 为准）。
+2. **`chat_id` 一律 snake_case**（与 message.canonical 的 `chat_id`/`msg_id` 同族）。响应里就叫 `chat_id`，不要 `chatId`。（注:既有 `/api/messages/send` 请求体历史用 `chatId`，那是旧端点入参、不在本契约约束面;本契约约束的是**响应/信封字段**,统一 snake。）
+3. **`opened` 三态接受**：本就在近期列表→`false`；自动翻出→`true`；没走到 open 就失败（未登录等）→`false`。语义=**「本次是否触发了自动翻出」,仅在 `ok:true` 时有意义**；失败时 `false`。AMR 留痕接受。
+4. **失败带结构化 `code` + 自由 `error`**（两个都要）。`code` 闭枚举：`CONTACT_NOT_FOUND`（wxid 非联系人）/ `AMBIGUOUS`（多匹配，不猜）/ `NOT_LOGGED_IN`（后端未登录）/ `SEND_FAILED`（翻出成功但发送失败）。AMR 按 `code` 分支（如 `AMBIGUOUS`→请人消歧、`NOT_LOGGED_IN`→提示登录），`error` 给人看的话。成功无 `code`。
+5. **撤预检握手时序 = 确认**（见 §3/§5）：后端**部署+真机验证冷会话能翻出后**，才让 `capabilities.send.auto_open:true` 正式生效并通知 AMR；**在此之前 AMR 保留 `_live_chat_ids` 预检 fallback，绝不提前撤**。AMR 读到 `auto_open:true` 且收到你的 verified 通知后，才放宽预检。
 
 ---
 
