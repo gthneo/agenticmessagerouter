@@ -64,7 +64,7 @@
 | `sender` | str | 是 | 发言人显示名（群里是发言成员名）。 |
 | `sender_id` | str | 否 | 发言人稳定 id（wxid）。给得出就给，利于跨账户归一。 |
 | `is_mentioned` | bool | 否 | 本条是否 @ 了 self（来自 msgsource `<atuserlist>`）。默认 false。 |
-| `msg_id` | str | 否 | 后端的稳定消息 id（如 fullwechat localId/serverId）。没有就省略，AMR 退回 content-hash 去重（`ingest.msg_key`）。 |
+| `msg_id` | str | 否 | 后端的**全局唯一 + 稳定**消息 id（去重锚点）。**必须跨会话不撞、跨重抓不变**——用 `serverId`（WeChat 服务端消息 id）这类全局唯一值。**严禁用会话内 `localId`/位置号**：localId 是会话内位置、会重用/重置，拿它当 `msg_id` → 同一会话内新消息撞老 key、被去重（`UNIQUE(conversation_id, msg_key)`）**静默丢弃**（2026-06-28 实战故障：群消息神秘不入库、自动回无候选）。没有就省略，AMR 退回 content-hash 去重（`ingest.msg_key`）。**口径 v1.1 加严：原文写"localId/serverId"任一即可是错的，必须全局唯一。** |
 
 ### 2.2 Per-kind 结构化子对象（可选，按 kind 出现）
 
