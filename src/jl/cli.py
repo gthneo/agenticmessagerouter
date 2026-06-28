@@ -552,16 +552,47 @@ def cmd_account(conn, params):
           f"\n   下一步: jl poll 拉新 → 在 Web 收件箱把该 self_id 确认进 SELF(我)。")
 
 
-def _account_ls(conn):
+def _account_token(a):
+    """Bearer token for one account row: its cred_ref file, else the default token."""
+    import os as _os
+    from .channels.fullwechat import _token
+    cred = (a.get("cred_ref") or "").strip()
+    if cred:
+        p = _os.path.expanduser(cred)
+        if _os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                return f.read().strip()
+    return _token()
+
+
+def _account_ls(conn, *, probe=None):
+    """List accounts. For each tool=fullwechat row, LIVE-probe the backend for its
+    software version (/api/status.version) + contract schema (/api/capabilities.schema)
+    so 运维/FDE see both version axes at a glance. Live (always current) > a DB column
+    that drifts; a down backend shows `unreachable` and never crashes the listing.
+    ``probe`` is the probe seam (tests inject a fake)."""
+    from . import onboard
+    probe = probe or onboard.probe_backend_versions
     accts = db.get_accounts(conn)
     print(f"\n📇 账号 accounts — 共 {len(accts)} 个")
-    print(f"{'id':<4} {'platform':<9} {'tool':<11} {'self_id':<22} {'host':<28} label")
-    print("─" * 90)
+    print(f"{'id':<4} {'platform':<9} {'tool':<11} {'self_id':<22} "
+          f"{'host':<28} {'后端版本':<11} {'契约schema':<22} label")
+    print("─" * 124)
     for a in accts:
+        ver, schema = "-", "-"
+        if a.get("tool") == "fullwechat":
+            host = (a.get("host") or "").strip() or DEFAULT_URL
+            try:
+                pv = probe(host, _account_token(a))
+            except Exception as e:  # never let a probe failure break the listing
+                pv = {"version": "unreachable", "schema": str(e)[:20]}
+            ver, schema = pv.get("version", "?"), pv.get("schema", "?")
         print(f"{a['account_id']:<4} {a['platform']:<9} {(a.get('tool') or '-'):<11} "
-              f"{(a.get('self_id') or '-'):<22} {(a.get('host') or '-'):<28} {a.get('label') or ''}")
+              f"{(a.get('self_id') or '-'):<22} {(a.get('host') or '-'):<28} "
+              f"{ver:<11} {schema:<22} {a.get('label') or ''}")
     if not accts:
         print("  (无账号 — jl account add 登记第一个后端)")
+    print("  （后端版本/契约schema 为实时探测，? = 未暴露，unreachable = 后端不可达）")
 
 
 def _print_account_plan(plan):

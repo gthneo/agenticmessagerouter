@@ -198,3 +198,33 @@ def test_route_draft_assist():
 
 def test_route_draft_assist_missing_id():
     assert cli.route(["draft-assist"]) == ("draft_assist", {"conversation_id": None})
+
+
+def test_account_ls_shows_probed_backend_version_and_schema(capsys):
+    c = db.connect(":memory:"); db.init_db(c)
+    db.upsert_account(c, account_id=1, platform="wechat", tool="fullwechat",
+                      self_id="wxid_test_self", host="http://backend.test:6174",
+                      label="测试号")
+
+    def fake_probe(host, token):
+        return {"version": "0.12.0", "schema": "message.canonical/1"}
+
+    cli._account_ls(c, probe=fake_probe)
+    out = capsys.readouterr().out
+    assert "0.12.0" in out
+    assert "message.canonical/1" in out
+    assert "测试号" in out
+
+
+def test_account_ls_unreachable_backend_does_not_crash(capsys):
+    c = db.connect(":memory:"); db.init_db(c)
+    db.upsert_account(c, account_id=1, platform="wechat", tool="fullwechat",
+                      self_id="wxid_test_self", host="http://down.test:6174",
+                      label="掉线号")
+
+    def boom(host, token):
+        raise OSError("refused")
+
+    cli._account_ls(c, probe=boom)  # must not raise
+    out = capsys.readouterr().out
+    assert "unreachable" in out
