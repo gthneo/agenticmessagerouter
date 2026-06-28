@@ -38,6 +38,7 @@ _ADDED_COLUMNS = {
     "suggestions": [("kind", "TEXT NOT NULL DEFAULT 'reply'")],
     "channels": [("pinned", "INTEGER NOT NULL DEFAULT 0")],
     "accounts": [("tool", "TEXT NOT NULL DEFAULT ''")],
+    "safe_phrases": [("builtin", "INTEGER NOT NULL DEFAULT 0")],
 }
 
 
@@ -53,6 +54,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     _ensure_columns(conn)
+    seed_default_safe_phrases(conn)
     conn.commit()
 
 
@@ -1139,10 +1141,36 @@ def token_summary(conn):
 
 # ----- safe_phrases (双闸·闸一 话术库) ----------------------------------------
 
+# 内置默认安全话术(随产品发布的必须内容,不可删)——双闸闸一开箱即有料。
+# 选「看不看都无害」的寒暄/确认/标准答复;凡承诺/金额/情绪一律不入。
+DEFAULT_SAFE_PHRASES = [
+    ("收到，马上处理", "确认"),
+    ("好的，收到，谢谢", "确认"),
+    ("在的，请讲", "寒暄"),
+    ("稍等，我看一下", "确认"),
+    ("好的，没问题", "确认"),
+    ("已收到，稍后回复您", "确认"),
+]
+
+
+def seed_default_safe_phrases(conn) -> int:
+    """幂等播种内置安全话术(builtin=1)。已存在同 pattern 则跳过。返回新增条数。"""
+    have = {p["pattern"] for p in get_safe_phrases(conn)}
+    n = 0
+    for pattern, kind in DEFAULT_SAFE_PHRASES:
+        if pattern not in have:
+            conn.execute(
+                "INSERT INTO safe_phrases (pattern, kind, builtin, created_at) VALUES (?, ?, 1, ?)",
+                (pattern, kind, _now()))
+            n += 1
+    conn.commit()
+    return n
+
+
 def add_safe_phrase(conn, pattern, kind=""):
     """Add an approved phrase/intent pattern to the whitelist (用户自灌). Returns id."""
     cur = conn.execute(
-        "INSERT INTO safe_phrases (pattern, kind, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO safe_phrases (pattern, kind, builtin, created_at) VALUES (?, ?, 0, ?)",
         (pattern, kind, _now()))
     conn.commit()
     return cur.lastrowid
@@ -1155,6 +1183,10 @@ def get_safe_phrases(conn):
 
 
 def delete_safe_phrase(conn, phrase_id):
-    """Remove an approved phrase by id."""
+    """删除用户话术;内置(builtin=1)不可删,返回是否删除。"""
+    row = conn.execute("SELECT builtin FROM safe_phrases WHERE id=?", (phrase_id,)).fetchone()
+    if row is None or row[0]:
+        return False
     conn.execute("DELETE FROM safe_phrases WHERE id=?", (phrase_id,))
     conn.commit()
+    return True
