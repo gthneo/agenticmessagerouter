@@ -1,0 +1,115 @@
+<!doctype html><html lang=zh><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>AMR 设置重构·三桶</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;background:#1c1c1e;color:#e6e6e8;min-height:100vh}
+.hdr{display:flex;gap:6px;align-items:center;padding:8px 14px;background:#2a2a2c;border-bottom:1px solid #3a3a3c;position:sticky;top:0}
+.hb{font-size:13px;padding:5px 12px;border-radius:8px;color:#9a9aa0;cursor:pointer}
+.hb.on{background:#1c1c1e;color:#e6e6e8;font-weight:700}
+.hb.act{color:#5fce86}
+.wrap{max-width:900px;margin:0 auto;padding:16px}
+.lead{font-size:12px;color:#7a7a80;margin:4px 2px 14px}
+.card{background:#2a2a2c;border:1px solid #3a3a3c;border-radius:12px;margin-bottom:14px;overflow:hidden}
+.card h2{font-size:14px;padding:11px 14px;border-bottom:1px solid #3a3a3c;display:flex;align-items:center;gap:8px}
+.card .b{padding:10px 14px}
+.idrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed #333;font-size:13px}
+.idrow:last-child{border:0}
+.k{font-size:11px;background:#23304a;color:#aab8e0;border-radius:6px;padding:1px 7px}
+.idrow .v{flex:1;font-family:ui-monospace,monospace;font-size:12px}
+.sel{background:#1c1c1e;border:1px solid #3a3a3c;color:#ccd;border-radius:6px;font-size:12px;padding:2px 6px}
+.x{color:#e89a9a;cursor:pointer;font-size:12px}
+.cand{background:#1d3526;border:1px solid #3c7a52;border-radius:9px;padding:9px 11px;display:flex;align-items:center;gap:10px;margin-top:8px;font-size:13px}
+.cand .d{flex:1}
+.btn{font-size:12px;border-radius:13px;padding:4px 12px;cursor:pointer;border:1px solid #3a5f88;background:#1c1c1e;color:#7fb0ec;white-space:nowrap}
+.btn.go{border-color:#3c7a52;background:#1d3526;color:#5fce86}
+.merge{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:9px;padding:9px 11px;display:flex;align-items:center;gap:10px;margin-top:8px;font-size:13px}
+.merge .d{flex:1}.merge .ev{font-size:11px;color:#8a8a90}
+textarea{width:100%;background:#1c1c1e;border:1px solid #3a3a3c;color:#ddd;border-radius:8px;padding:8px;font:inherit;height:64px;resize:none}
+/* 偏好轻量 */
+.pref{display:flex;gap:20px;flex-wrap:wrap;align-items:center;font-size:13px}
+.pref label{display:flex;gap:6px;align-items:center}
+/* 运维折叠 accordion */
+.acc{background:#222;border:1px solid #3a3a3c;border-radius:10px;margin-bottom:8px;overflow:hidden}
+.acc .ah{padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:#bbb}
+.acc .ah .chev{color:#666}.acc .ah .tag{margin-left:auto;font-size:11px;color:#777}
+.acc.open .ah{border-bottom:1px solid #3a3a3c;color:#e6e6e8}
+.acc .ab{display:none;padding:11px 14px}.acc.open .ab{display:block}
+.cfgrow{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px}
+.cfgrow .lbl{width:90px;color:#9a9aa0;font-size:12px}
+.inp{flex:1;background:#1c1c1e;border:1px solid #3a3a3c;color:#bbb;border-radius:6px;padding:4px 8px;font-family:ui-monospace,monospace;font-size:12px}
+.opsnote{font-size:11px;color:#6a6a70;margin-bottom:8px;font-style:italic}
+.sec-title{font-size:12px;color:#7a7a80;text-transform:uppercase;letter-spacing:1px;margin:18px 2px 8px}
+.fab{position:fixed;right:18px;bottom:18px;background:#1d3526;border:1.5px solid #3c7a52;color:#5fce86;border-radius:24px;padding:10px 16px;font-weight:700;font-size:14px;box-shadow:0 6px 18px #0006;cursor:pointer}
+</style></head>
+<body>
+<div class=hdr>
+ <span class=hb>← 收件箱</span>
+ <span class="hb on">🔄 归一</span>
+ <span class=hb>⭐ 偏好</span>
+ <span class=hb>⚙ 设置</span>
+ <span style="margin-left:auto;font-size:11px;color:#5a5a60">三桶重构 mock · 合成数据</span>
+</div>
+
+<div class=wrap>
+ <div class=lead>🔄 归一工作台 —— 关系卫生:我是谁、哪些号是我、哪些会话是同一个人。从"设置"里搬出来,一等公民。</div>
+
+ <!-- 我的身份 SELF -->
+ <div class=card>
+  <h2>👤 我的身份（SELF · 这些号发的都认作「我」）</h2>
+  <div class=b>
+   <div class=idrow><span class=k>wechat</span><span class=v>wxid_test_main</span><select class=sel><option>工作</option></select><span class=x>移除 ✕</span></div>
+   <div class=idrow><span class=k>wechat</span><span class=v>wxid_test_dev（测试号）</span><select class=sel><option>工作</option></select><span class=x>移除 ✕</span></div>
+   <div class=idrow><span class=k>phone</span><span class=v>138****0000</span><select class=sel><option>生活</option></select><span class=x>移除 ✕</span></div>
+  </div>
+ </div>
+
+ <!-- 疑似你自己的号 -->
+ <div class=card>
+  <h2>🔎 疑似你自己的号（点「这是我」才纳入）</h2>
+  <div class=b>
+   <div class=cand><div class=d><span class=k>wechat</span> wxid_test_alt · 测试号B</div><span class="btn go">✓ 这是我,纳入</span><span class=btn>不理</span></div>
+  </div>
+ </div>
+
+ <!-- 人归并候选 -->
+ <div class=card>
+  <h2>🧩 人归并候选（同一个人散在多个会话 → 合并）</h2>
+  <div class=b>
+   <div class=merge><div class=d>张三 <span class=ev>· 微信会话 + 电话 5 次通话,同名同号段 → 像同一人</span></div><span class="btn go">合并</span><span class=btn>忽略</span></div>
+   <div class=merge><div class=d>李四 / 小李 <span class=ev>· 两条会话疑似同人(昵称+证据)</span></div><span class="btn go">合并</span><span class=btn>忽略</span></div>
+  </div>
+ </div>
+
+ <!-- 我是谁 persona -->
+ <div class=card>
+  <h2>🪞 我是谁（喂 LLM 拟话术 · 随时可改）</h2>
+  <div class=b><textarea>班迪：性格 / 灵魂 / 喜好 / 工作中的特征 / 核心词……（让 AI 起草带你的人味）</textarea>
+   <div style="margin-top:8px"><span class="btn go">💾 保存</span></div></div>
+ </div>
+
+ <!-- 用户偏好 轻量 -->
+ <div class=sec-title>⭐ 用户偏好</div>
+ <div class=card><div class=b class=pref style="display:flex;gap:24px;flex-wrap:wrap;align-items:center">
+  <label>🎨 主题 <select class=sel><option>跟随系统</option><option>浅色</option><option>深色</option></select></label>
+  <label>📤 发送 <input class=sel style="width:46px" value=5> 秒倒数自动发</label>
+ </div></div>
+
+ <!-- 运维 折叠 -->
+ <div class=sec-title>⚙ 设置（运维 · 平常收起,点开才展）</div>
+ <div class=opsnote>用户一般不碰;现场 Build / 运维 Agent 才需要。</div>
+
+ <div class="acc open">
+  <div class=ah><span class=chev>▾</span> 🔌 账号-后端绑定 <span class=tag>2 后端</span></div>
+  <div class=ab>
+   <div class=cfgrow><span class=lbl>测试号</span><input class=inp value="fullwechat @ http://host-a:6174"><span class=tag style=color:#5fce86>● 在线</span></div>
+   <div class=cfgrow><span class=lbl>主号A</span><input class=inp value="fullwechat @ http://host-b:6174"><span class=tag style=color:#cf8a00>● 待登录</span></div>
+  </div>
+ </div>
+ <div class=acc><div class=ah><span class=chev>▸</span> 🌐 接入后端 URL / FQDN 域名 <span class=tag>fullwechat · powerdata</span></div></div>
+ <div class=acc><div class=ah><span class=chev>▸</span> 🔑 凭据 / token 状态 <span class=tag>已配置(不在 UI 明文)</span></div></div>
+ <div class=acc><div class=ah><span class=chev>▸</span> 🩺 分层运维日志 <span class=tag>WARN/ERROR 筛选</span></div></div>
+</div>
+
+<div class=fab>＋ 记一件事</div>
+</body></html>
