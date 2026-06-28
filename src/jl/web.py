@@ -552,6 +552,14 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  .bub{max-width:82%}
 }
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
+<div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
+ 皮肤
+ <select id=skinsel onchange="setSkin(this.value)">
+  <option value=digest>今日简报</option>
+  <option value=inbox>收件箱(三栏)</option>
+ </select>
+</div>
+<div id=skin-digest style="display:none;height:100vh;overflow:auto"></div>
 <div id=side>
  <div class=sec>📞 该联系谁</div><div id=proactive></div>
  <div class=sec>👤 联系人</div><div id=persons></div>
@@ -605,6 +613,15 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  <div id=matters></div>
  <div class=sec>✨ 话术 <span style="font-weight:400;color:#a40;font-size:12px">· 先🩺诊断更准</span></div><div id=suggest></div></div>
 <script>
+function curSkin(){return localStorage.getItem('amr_skin')||'digest';}
+function applySkin(){const s=curSkin();
+ const dig=document.getElementById('skin-digest');
+ const inboxEls=['side','main','right'].map(id=>document.getElementById(id)).filter(Boolean);
+ if(s==='digest'){dig.style.display='block';inboxEls.forEach(e=>e.style.display='none');loadDigest();}
+ else{dig.style.display='none';inboxEls.forEach(e=>e.style.display='');}
+ const sel=document.getElementById('skinsel');if(sel)sel.value=s;}
+function setSkin(s){localStorage.setItem('amr_skin',s);applySkin();}
+function loadDigest(){/* Task 4 实现 */}
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
 const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetch('/api'+s+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())};
@@ -808,5 +825,5 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
 document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
-loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()
+loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();
 </script></body></html>"""
