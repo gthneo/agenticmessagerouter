@@ -1,0 +1,108 @@
+<!doctype html><html lang=zh><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>AMR 皮肤①·隐喻锚定矩形</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:#222;background:#dfe3e8;height:100vh;display:flex;flex-direction:column}
+.title{padding:6px 14px;background:#1f2530;color:#cfe;font-size:12px;display:flex;gap:10px;align-items:center}
+.title b{color:#fff;font-size:13px}.title .lg{margin-left:auto;font-size:11px;color:#9ab}
+.stage{flex:1;display:grid;grid-template-columns:200px 1fr 270px;grid-template-rows:1fr auto;min-height:0}
+/* 中间场:人列表 + 会话 */
+.people{grid-row:1/3;background:#fbfbfb;border-right:1px solid #e3e3e3;overflow:auto}
+.people h3{font-size:11px;color:#8a93a0;padding:10px 12px 4px}
+.pc{padding:9px 12px;border-bottom:1px solid #f2f2f2;cursor:pointer;display:flex;gap:8px;align-items:center}
+.pc.on{background:#eef4ff}.pc .av{width:30px;height:30px;border-radius:6px;background:#c7d0dd;color:#445;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.pc .nm{font-weight:600;font-size:13px}.pc .sub{font-size:11px;color:#9aa}
+.dot{width:7px;height:7px;border-radius:50%;margin-left:auto}.red{background:#e5484d}.amber{background:#f5a524}.green{background:#46a758}
+.field{position:relative;background:#ededed;overflow:auto;padding:14px 14px 6px}
+.field .fl{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-size:11px;color:#aab;background:#fff;border-radius:10px;padding:1px 10px}
+.m{margin:9px 0;display:flex;flex-direction:column}.m.in{align-items:flex-start}.m.out{align-items:flex-end}
+.m .s{font-size:11px;color:#9aa;margin:0 4px 2px}
+.bub{max-width:74%;padding:7px 10px;border-radius:8px;white-space:pre-wrap}
+.m.in .bub{background:#fff}.m.out .bub{background:#95ec69}
+.sys{text-align:center;color:#999;font-size:12px;margin:8px auto}
+/* 右上:事·北极星 */
+.matter{grid-row:1/3;display:flex;flex-direction:column;border-left:1px solid #e3e3e3;background:#fff}
+.northstar{margin:10px;border:1.5px solid #f5c451;border-radius:10px;background:linear-gradient(180deg,#fffdf3,#fff7e0)}
+.northstar .h{padding:8px 12px;font-weight:700;color:#946b00;display:flex;align-items:center;gap:6px;border-bottom:1px solid #f3e3ac}
+.northstar .b{padding:10px 12px;font-size:13px}
+.kv{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #eee}.kv:last-child{border:0}
+.kv b{color:#946b00}.pill{font-size:11px;background:#fff3cf;color:#946b00;border-radius:10px;padding:1px 8px}
+.cfg{margin:0 10px;padding:9px 12px;border:1px solid #eee;border-radius:8px;font-size:12px;color:#667}
+.cfg h4{font-size:11px;color:#99a;margin-bottom:5px}.cfg .ln{padding:2px 0;display:flex;justify-content:space-between}
+/* 左下:我·站位 */
+.me{grid-column:1/3;background:#f4f7fb;border-top:2px solid #c9d6ea;padding:8px 12px;display:flex;gap:10px;align-items:flex-start}
+.me .av{width:34px;height:34px;border-radius:8px;background:#3b6fb5;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
+.me .col{flex:1}.me .who{font-size:12px;color:#456;margin-bottom:4px}.me .who b{color:#234}
+.me textarea{width:100%;border:1px solid #cdd6e2;border-radius:8px;padding:6px 8px;font:inherit;resize:none;height:42px}
+.drafts{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.draft{font-size:12px;background:#fff;border:1px solid #d6dfea;border-radius:14px;padding:3px 10px;cursor:pointer}
+.draft.pri{border-color:#46a758;background:#e9f7ee;color:#176}
+.megear{font-size:11px;color:#789;margin-top:6px;display:flex;gap:12px}
+.megear span{cursor:pointer}
+.corner{position:fixed;font-size:11px;color:#fff;background:#2a3340cc;border-radius:6px;padding:2px 8px;z-index:9}
+.cTL{top:34px;left:210px}.cTR{top:34px;right:282px}.cBL{bottom:96px;left:14px}
+</style></head>
+<body>
+<div class=title><b>AMR 皮肤①</b> 隐喻锚定矩形 ·「左下=我 ▸ 右上=事」可扫矩形
+ <span class=lg>合成数据演示 · 以人为本 / 以终为始 / 物质·能量·信息</span></div>
+
+<div class=stage>
+  <!-- 中间场:人 -->
+  <div class=people>
+    <h3>我看出去的人和事</h3>
+    <div class="pc on"><div class=av>张</div><div><div class=nm>张三</div><div class=sub>客户·回款</div></div><div class="dot red"></div></div>
+    <div class=pc><div class=av>李</div><div><div class=nm>李四</div><div class=sub>客户·报价</div></div><div class="dot amber"></div></div>
+    <div class=pc><div class=av>王</div><div><div class=nm>王五</div><div class=sub>家人</div></div><div class="dot green"></div></div>
+    <div class=pc><div class=av>群</div><div><div class=nm>甲乙丙项目群</div><div class=sub>场·3方·1事</div></div></div>
+    <div class=pc><div class=av>📢</div><div><div class=nm>新品营销群</div><div class=sub>大群·浮线索 2</div></div></div>
+  </div>
+
+  <!-- 中间场:会话 -->
+  <div class=field>
+    <div class=fl>信息·能量·物质 的流动场</div>
+    <div style="height:18px"></div>
+    <div class="m in"><span class=s>张三</span><div class=bub>王总，上次说的尾款这两天能安排吗？</div></div>
+    <div class="m out"><div class=bub>这周内一定到账，今天我盯一下财务。</div></div>
+    <div class="m in"><span class=s>张三</span><div class=bub>好的，那我就放心了 👍</div></div>
+    <div class=sys>— 承诺已记入右上事卡 · 到期提醒明天 —</div>
+  </div>
+
+  <!-- 右上:事·北极星 + 该事配置 -->
+  <div class=matter>
+    <div class=northstar>
+      <div class=h>◎ 事·北极星 <span class=pill>进行</span></div>
+      <div class=b>
+        <div class=kv><span>向张三回款</span><b>¥50,000</b></div>
+        <div class=kv><span>阶段</span><b>候选›进行›等待›成交</b></div>
+        <div class=kv><span>承诺到期</span><b>明天 18:00</b></div>
+        <div class=kv><span>类型</span><span class=pill>落地业务(A)</span></div>
+      </div>
+    </div>
+    <div class=cfg>
+      <h4>该事配置(贴着事)</h4>
+      <div class=ln><span>lifecycle 模板</span><b>落地A</b></div>
+      <div class=ln><span>到期提醒</span><b>开</b></div>
+      <div class=ln><span>归属人</span><b>张三 +2</b></div>
+    </div>
+  </div>
+
+  <!-- 左下:我·站位 -->
+  <div class=me>
+    <div class=av>王</div>
+    <div class=col>
+      <div class=who>▣ <b>我·王总</b> 的站位 · 发给 <b>张三</b></div>
+      <textarea>这周内一定到账，今天我盯一下财务。</textarea>
+      <div class=drafts>
+        <span class="draft pri">✓ 用这版(倒数5s自动发)</span>
+        <span class=draft>稳一点的说法</span>
+        <span class=draft>给个具体日期</span>
+      </div>
+      <div class=megear><span>👤 我的身份归一</span><span>🕘 我的时间窗</span><span>🔌 接入后端</span><span>🎨 主题</span><span>⚙ 更多设置</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="corner cBL">左下·我的原点</div>
+<div class="corner cTR">右上·事的终点</div>
+</body></html>

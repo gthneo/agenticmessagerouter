@@ -1,0 +1,74 @@
+<!doctype html><html lang=zh><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>AMR 皮肤②·真对角线</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:#222;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.title{padding:6px 14px;background:#1f2530;color:#cfe;font-size:12px;display:flex;gap:10px;align-items:center}
+.title b{color:#fff;font-size:13px}.title .lg{margin-left:auto;font-size:11px;color:#9ab}
+.stage{flex:1;position:relative;background:
+  radial-gradient(1200px 800px at 12% 88%, #eaf2ff 0%, transparent 55%),
+  radial-gradient(1000px 700px at 88% 12%, #fff5e0 0%, transparent 55%),
+  #f4f6f9;overflow:hidden}
+/* 对角线轴 */
+.axis{position:absolute;left:9%;bottom:11%;width:96%;height:3px;background:linear-gradient(90deg,#3b6fb5,#f5a524);transform-origin:left center;transform:rotate(-38deg);opacity:.35}
+.axlab{position:absolute;color:#7a869a;font-size:12px;font-weight:600;letter-spacing:2px}
+.axlab.i{left:26%;bottom:38%}.axlab.e{left:46%;bottom:54%}.axlab.m{left:64%;bottom:69%}
+/* 我·左下 */
+.me{position:absolute;left:3%;bottom:5%;width:300px;background:#eef4ff;border:1.5px solid #b9cdef;border-radius:12px;padding:10px 12px;box-shadow:0 6px 18px #0001}
+.me .who{font-size:12px;color:#345;margin-bottom:6px}.me .who b{color:#123}
+.me textarea{width:100%;border:1px solid #c3d2ec;border-radius:8px;padding:6px 8px;font:inherit;resize:none;height:40px}
+.me .drafts{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.me .draft{font-size:12px;background:#fff;border:1px solid #cbd8ee;border-radius:14px;padding:2px 9px;cursor:pointer}
+.me .draft.pri{border-color:#46a758;background:#e9f7ee;color:#176}
+.me .gear{font-size:11px;color:#789;margin-top:6px}
+.tag{position:absolute;left:3%;bottom:calc(5% + 150px);font-size:11px;color:#3b6fb5;font-weight:700}
+/* 事·右上 */
+.ns{position:absolute;right:3%;top:6%;width:280px;background:linear-gradient(180deg,#fffdf3,#fff4d6);border:1.5px solid #f5c451;border-radius:12px;padding:10px 12px;box-shadow:0 6px 18px #0001}
+.ns .h{font-weight:700;color:#946b00;display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.pill{font-size:11px;background:#fff3cf;color:#946b00;border-radius:10px;padding:1px 8px}
+.kv{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #efe3bf;font-size:13px}.kv:last-child{border:0}.kv b{color:#946b00}
+.nstag{position:absolute;right:3%;top:calc(6% + 158px);font-size:11px;color:#946b00;font-weight:700;text-align:right;width:280px}
+/* 会话卡沿对角线步进 */
+.msg{position:absolute;max-width:300px;padding:8px 11px;border-radius:10px;box-shadow:0 3px 10px #0001;font-size:13px;background:#fff}
+.msg .s{font-size:11px;color:#9aa;display:block;margin-bottom:2px}
+.msg.out{background:#dff7cf;border:1px solid #bfe6a3}
+.m1{left:23%;bottom:30%}.m2{left:38%;bottom:44%}.m3{left:52%;bottom:55%}
+.sys{position:absolute;left:33%;bottom:24%;font-size:12px;color:#8a93a0;background:#fff;border-radius:10px;padding:2px 10px;box-shadow:0 2px 6px #0001}
+.legend{position:absolute;left:50%;bottom:2%;transform:translateX(-50%);font-size:11px;color:#9aa}
+</style></head>
+<body>
+<div class=title><b>AMR 皮肤②</b> 真对角线 ·「我(左下) ↗ 事(右上)」内容沿斜轴流
+ <span class=lg>合成数据演示 · 信息→能量→物质 沿对角转换</span></div>
+
+<div class=stage>
+  <div class=axis></div>
+  <div class="axlab i">信息</div>
+  <div class="axlab e">能量</div>
+  <div class="axlab m">物质</div>
+
+  <div class=tag>▣ 我的原点 / 站位</div>
+  <div class=me>
+    <div class=who>▣ <b>我·王总</b> · 发给 <b>张三</b></div>
+    <textarea>这周内一定到账，今天我盯一下财务。</textarea>
+    <div class=drafts><span class="draft pri">✓ 用这版·倒数5s</span><span class=draft>稳一点</span><span class=draft>给日期</span></div>
+    <div class=gear>👤身份 · 🕘时间窗 · 🔌后端 · ⚙更多</div>
+  </div>
+
+  <div class="msg m1"><span class=s>张三</span>王总，上次说的尾款这两天能安排吗？</div>
+  <div class="msg m2 out"><span class=s>我</span>这周内一定到账，今天我盯一下财务。</div>
+  <div class="msg m3"><span class=s>张三</span>好的，那我就放心了 👍</div>
+  <div class=sys>承诺已记入事卡 · 到期明天</div>
+
+  <div class=ns>
+    <div class=h>◎ 事·北极星 <span class=pill>进行</span></div>
+    <div class=kv><span>向张三回款</span><b>¥50,000</b></div>
+    <div class=kv><span>承诺到期</span><b>明天18:00</b></div>
+    <div class=kv><span>类型</span><span class=pill>落地A</span></div>
+    <div class=kv><span>该事配置</span><b>模板/提醒/归属 ▸</b></div>
+  </div>
+  <div class=nstag>◎ 事的终点 / 北极星 ↗ 以终为始</div>
+
+  <div class=legend>内容真沿左下→右上对角线排：醒目 · 差异化 · 但留白多、列表难塞</div>
+</div>
+</body></html>

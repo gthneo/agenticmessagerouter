@@ -1,0 +1,139 @@
+<!doctype html><html lang=zh><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>AMR·手机端(三屏)</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.5 -apple-system,"PingFang SC",sans-serif;color:#222;background:#11151c;padding:18px;display:flex;gap:22px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+.cap{color:#9fb0c4;font-size:12px;text-align:center;margin-bottom:6px}
+.cap b{color:#cfe}
+.col{display:flex;flex-direction:column}
+.phone{width:340px;height:712px;background:#fff;border-radius:30px;overflow:hidden;box-shadow:0 10px 36px #0008;display:flex;flex-direction:column;border:6px solid #222}
+.sb{height:24px;background:#1f2530;color:#cdd;font-size:10px;display:flex;align-items:center;justify-content:space-between;padding:0 14px}
+.body{flex:1;overflow:auto}
+.tabbar{height:50px;border-top:1px solid #e7e9ee;display:flex;background:#fafbfc}
+.tb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:#8a93a0;gap:1px}
+.tb .i{font-size:17px}.tb.on{color:#2c6fd6}
+/* 通用 */
+.hd{padding:10px 14px;display:flex;align-items:baseline;gap:8px;border-bottom:1px solid #eef0f3}
+.hd h1{font-size:16px}.hd .dt{font-size:11px;color:#8a93a0}.hd .me{margin-left:auto;font-size:11px;color:#2c6fd6}
+.pill{font-size:10px;border-radius:9px;padding:1px 7px}.pA{background:#fff3cf;color:#946b00}.pP{background:#e7f0ff;color:#2c6fd6}
+.btn{font-size:11px;border-radius:13px;padding:3px 11px;border:1px solid #cbd8ee;background:#fff;white-space:nowrap}
+.btn.go{border-color:#46a758;background:#e9f7ee;color:#176}.btn.no{border-color:#e5b4b4;background:#fdeeee;color:#a33}
+/* P1 简报 */
+.gate{margin:10px;background:linear-gradient(180deg,#fff7e6,#fff0cc);border:1.5px solid #f3c969;border-radius:12px;padding:9px 11px}
+.gate h2{font-size:12px;color:#946b00;margin-bottom:6px}
+.gi{padding:6px 0;border-bottom:1px dashed #efdca6;font-size:12px}.gi:last-child{border:0}
+.gi .r{display:flex;gap:6px;margin-top:5px}
+.rc{margin:0 10px 10px;background:#fff;border:1px solid #e6e9ee;border-radius:11px;padding:9px 11px;box-shadow:0 1px 5px #0000000a}
+.rc h3{font-size:13px;display:flex;gap:6px;align-items:center;margin-bottom:5px}.rc .dr{margin-left:auto;font-size:11px;color:#2c6fd6}
+.rc .ld{font-size:12px;color:#445;background:#f6f8fb;border-left:3px solid #c7d3e6;border-radius:7px;padding:5px 7px;margin-bottom:6px}
+.st{display:flex;gap:12px}.st .s{font-size:11px;color:#789}.st .s b{display:block;font-size:15px;color:#1b2330}
+.st .s.red b{color:#e5484d}.st .s.amber b{color:#cf8a00}.st .s.green b{color:#2c8a45}
+/* P2 会话:事顶 / 我底 */
+.ns{background:linear-gradient(180deg,#fffdf3,#fff4d6);border-bottom:1.5px solid #f5c451;padding:8px 12px}
+.ns .t{font-weight:700;color:#946b00;font-size:13px;display:flex;align-items:center;gap:6px}
+.ns .k{display:flex;justify-content:space-between;font-size:12px;color:#7a5e00;margin-top:3px}.ns .k b{color:#946b00}
+.back{font-size:12px;color:#2c6fd6;padding:6px 12px 0}
+.chat{padding:10px 12px;background:#ededed;min-height:330px}
+.m{margin:7px 0;display:flex;flex-direction:column}.m.in{align-items:flex-start}.m.out{align-items:flex-end}
+.m .s{font-size:10px;color:#9aa;margin:0 4px 2px}
+.bub{max-width:80%;padding:6px 9px;border-radius:8px;font-size:12px;white-space:pre-wrap}
+.m.in .bub{background:#fff}.m.out .bub{background:#95ec69}
+.sys{text-align:center;color:#999;font-size:11px;margin:7px auto}
+.composer{border-top:2px solid #c9d6ea;background:#f4f7fb;padding:8px 10px}
+.composer .who{font-size:11px;color:#456;margin-bottom:4px}.composer .who b{color:#234}
+.chips{display:flex;gap:5px;margin-bottom:6px;flex-wrap:wrap}
+.chip{font-size:11px;background:#fff;border:1px solid #d6dfea;border-radius:13px;padding:2px 9px}.chip.pri{border-color:#46a758;background:#e9f7ee;color:#176}
+.cd{display:flex;align-items:center;gap:8px;background:#fffbe6;border:1px solid #f3e3ac;border-radius:9px;padding:5px 9px;font-size:12px}
+.cd .t{flex:1;color:#333}.cd b{color:#a40}
+/* P3 事视图 竖向分组 */
+.grp{margin:10px 10px 0}.grp h4{font-size:12px;color:#8a93a0;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.mc{background:#fff;border:1px solid #e6e9ee;border-left:3px solid #f5c451;border-radius:9px;padding:8px 10px;margin-bottom:7px}
+.mc.wait{border-left-color:#cdd6e2}.mc.cand{border-left-color:#bcd}
+.mc .t1{font-size:13px;font-weight:600}.mc .t2{font-size:11px;color:#889;display:flex;justify-content:space-between;margin-top:3px}
+</style></head>
+<body>
+
+<!-- P1 简报 -->
+<div class=col>
+ <div class=cap><b>① 简报</b> · 控制者家门口(看总结/扳手柄)</div>
+ <div class=phone>
+  <div class=sb><span>9:41</span><span>AMR ▣王总</span></div>
+  <div class=body>
+   <div class=hd><h1>今日简报</h1><span class=dt>6-28 周日</span><span class=me>6份报告</span></div>
+   <div class=gate>
+    <h2>⚖ 需你拍板(4)</h2>
+    <div class=gi>🤝 张三尾款承诺<b>明天到期</b>·草稿已备→倒数自动发?
+      <div class=r><span class="btn go">放行</span><span class=btn>改改</span></div></div>
+    <div class=gi>📢 营销群浮 <b>2 线索</b>→拉小群?
+      <div class=r><span class="btn go">建小群</span><span class=btn>稍后</span></div></div>
+    <div class=gi>🤝 <b>4 客户</b>转凉→上班时段主动撩?
+      <div class=r><span class="btn go">放行撩</span><span class=btn>逐个看</span></div></div>
+   </div>
+   <div class=rc><h3>📈 销售报告<span class=dr>›</span></h3>
+    <div class=ld>今日成交 1 单 ¥50,000，2 单等待回。</div>
+    <div class=st><span class="s green"><b>1</b>成交</span><span class=s><b>3</b>进行</span><span class="s amber"><b>2</b>等待</span></div></div>
+   <div class=rc><h3>🤝 关系报告<span class=dr>›</span></h3>
+    <div class=ld>3 逾期该联系，4 转凉；今日建议撩 4。</div>
+    <div class=st><span class="s red"><b>3</b>逾期</span><span class="s amber"><b>4</b>转凉</span><span class="s green"><b>12</b>稳</span></div></div>
+   <div class=rc><h3>🗂 业务进展<span class=dr>›</span></h3>
+    <div class=ld>5 事推进，2 承诺到期，1 卡住待你。</div></div>
+  </div>
+  <div class=tabbar><div class="tb on"><span class=i>📋</span>简报</div><div class=tb><span class=i>👥</span>人</div><div class=tb><span class=i>🗂</span>事</div><div class=tb><span class=i>⚙</span>我</div></div>
+ </div>
+</div>
+
+<!-- P2 会话:事顶/我底 -->
+<div class=col>
+ <div class=cap><b>② 会话</b> · 竖屏「我↓ 事↑」轴(事钉顶/我钉底)</div>
+ <div class=phone>
+  <div class=sb><span>9:41</span><span>张三</span></div>
+  <div class=back>‹ 简报 / 人</div>
+  <div class=ns>
+   <div class=t>◎ 事·北极星 <span class="pill pA">进行</span></div>
+   <div class=k><span>向张三回款</span><b>¥50,000</b></div>
+   <div class=k><span>承诺到期</span><b>明天18:00</b></div>
+  </div>
+  <div class=body>
+   <div class=chat>
+    <div class="m in"><span class=s>张三</span><div class=bub>王总，尾款这两天能安排吗？</div></div>
+    <div class="m out"><div class=bub>这周内一定到账，今天我盯一下财务。</div></div>
+    <div class="m in"><span class=s>张三</span><div class=bub>好的，那我放心了 👍</div></div>
+    <div class=sys>承诺已记入顶部事卡·到期明天</div>
+   </div>
+  </div>
+  <div class=composer>
+   <div class=who>▣ <b>我·王总</b> 发给 张三</div>
+   <div class=chips><span class="chip pri">✓ 用这版</span><span class=chip>稳一点</span><span class=chip>给日期</span></div>
+   <div class=cd><span class=t>⏳ <b>5s</b> 后自动发：这周内一定到账…</span><span class="btn go">立即</span><span class=btn>改改</span></div>
+  </div>
+ </div>
+</div>
+
+<!-- P3 事视图 -->
+<div class=col>
+ <div class=cap><b>③ 事视图</b> · 看板列→竖向分组折叠</div>
+ <div class=phone>
+  <div class=sb><span>9:41</span><span>事·lifecycle</span></div>
+  <div class=hd><h1>事视图</h1><span class=me>8 件</span></div>
+  <div class=body>
+   <div class=grp><h4>🟢 进行(2)</h4>
+    <div class=mc><div class=t1>向张三回款 ¥50k</div><div class=t2><span>落地A·张三</span><span>承诺明天到期</span></div></div>
+    <div class=mc><div class=t1>甲乙丙项目推进</div><div class=t2><span>场·3方</span><span>本周节点</span></div></div>
+   </div>
+   <div class=grp><h4>🟡 等待(1)</h4>
+    <div class="mc wait"><div class=t1>给李四报价</div><div class=t2><span>落地A·李四</span><span>等对方回</span></div></div>
+   </div>
+   <div class=grp><h4>📢 营销·浮线索(2)</h4>
+    <div class="mc cand"><div class=t1>新品群线索·李客户</div><div class=t2><span>营销B</span><span>建议拉小群</span></div></div>
+    <div class="mc cand"><div class=t1>新品群线索·赵客户</div><div class=t2><span>营销B</span><span>建议拉小群</span></div></div>
+   </div>
+   <div class=grp><h4>⚪ 候选(2)</h4>
+    <div class="mc cand"><div class=t1>王五·家事提醒</div><div class=t2><span>关系维护</span><span>待确认</span></div></div>
+   </div>
+  </div>
+  <div class=tabbar><div class=tb><span class=i>📋</span>简报</div><div class=tb><span class=i>👥</span>人</div><div class="tb on"><span class=i>🗂</span>事</div><div class=tb><span class=i>⚙</span>我</div></div>
+ </div>
+</div>
+
+</body></html>

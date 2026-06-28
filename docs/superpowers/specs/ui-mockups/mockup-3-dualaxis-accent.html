@@ -1,0 +1,99 @@
+<!doctype html><html lang=zh><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>AMR 皮肤③·双轴可切+隐喻点缀</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;color:#222;background:#dfe3e8;height:100vh;display:flex;flex-direction:column}
+.title{padding:6px 14px;background:#1f2530;color:#cfe;font-size:12px;display:flex;gap:10px;align-items:center}
+.title b{color:#fff;font-size:13px}.title .lg{margin-left:auto;font-size:11px;color:#9ab}
+.tabs{display:flex;gap:4px;background:#eef1f5;padding:6px 12px;border-bottom:1px solid #dde}
+.tab{font-size:13px;padding:5px 16px;border-radius:8px 8px 0 0;cursor:pointer;color:#678}
+.tab.on{background:#fff;font-weight:700;color:#234;box-shadow:0 -2px 6px #0001}
+.stage{flex:1;display:grid;grid-template-columns:210px 1fr 268px;min-height:0}
+.people{background:#fbfbfb;border-right:1px solid #e3e3e3;overflow:auto}
+.people h3{font-size:11px;color:#8a93a0;padding:10px 12px 4px}
+.pc{padding:9px 12px;border-bottom:1px solid #f2f2f2;cursor:pointer;display:flex;gap:8px;align-items:center}
+.pc.on{background:#eef4ff}.pc .av{width:30px;height:30px;border-radius:6px;background:#c7d0dd;color:#445;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.pc .nm{font-weight:600;font-size:13px}.pc .sub{font-size:11px;color:#9aa}
+.dot{width:7px;height:7px;border-radius:50%;margin-left:auto}.red{background:#e5484d}.amber{background:#f5a524}.green{background:#46a758}
+.mid{display:flex;flex-direction:column;min-height:0}
+.msgs{flex:1;background:#ededed;overflow:auto;padding:14px}
+.m{margin:9px 0;display:flex;flex-direction:column}.m.in{align-items:flex-start}.m.out{align-items:flex-end}
+.m .s{font-size:11px;color:#9aa;margin:0 4px 2px}
+.bub{max-width:74%;padding:7px 10px;border-radius:8px;white-space:pre-wrap}
+.m.in .bub{background:#fff}.m.out .bub{background:#95ec69}
+.sys{text-align:center;color:#999;font-size:12px;margin:8px auto}
+/* 左下固定:我·composer */
+.me{border-top:2px solid #c9d6ea;background:#f4f7fb;padding:8px 12px;display:flex;gap:10px;align-items:flex-start}
+.me .av{width:32px;height:32px;border-radius:8px;background:#3b6fb5;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
+.me .col{flex:1}.me .who{font-size:12px;color:#456;margin-bottom:4px}.me .who b{color:#234}
+.me textarea{width:100%;border:1px solid #cdd6e2;border-radius:8px;padding:6px 8px;font:inherit;resize:none;height:38px}
+.drafts{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.draft{font-size:12px;background:#fff;border:1px solid #d6dfea;border-radius:14px;padding:3px 10px;cursor:pointer}
+.draft.pri{border-color:#46a758;background:#e9f7ee;color:#176}
+.megear{font-size:11px;color:#789;margin-top:6px}
+.right{border-left:1px solid #e3e3e3;background:#fff;overflow:auto}
+/* 右上角高亮事卡 */
+.ns{margin:10px;border:1.5px solid #f5c451;border-radius:10px;background:linear-gradient(180deg,#fffdf3,#fff7e0);box-shadow:0 4px 14px #f5c45133}
+.ns .h{padding:8px 12px;font-weight:700;color:#946b00;display:flex;align-items:center;gap:6px;border-bottom:1px solid #f3e3ac}
+.ns .b{padding:10px 12px}.pill{font-size:11px;background:#fff3cf;color:#946b00;border-radius:10px;padding:1px 8px}
+.kv{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #eee;font-size:13px}.kv:last-child{border:0}.kv b{color:#946b00}
+.cfg{margin:0 10px 10px;padding:9px 12px;border:1px solid #eee;border-radius:8px;font-size:12px;color:#667}
+.cfg h4{font-size:11px;color:#99a;margin-bottom:5px}.cfg .ln{padding:2px 0;display:flex;justify-content:space-between}
+.note{position:fixed;right:280px;top:78px;font-size:11px;color:#946b00;background:#fff7e0;border:1px solid #f3e3ac;border-radius:6px;padding:2px 8px}
+.note2{position:fixed;left:14px;bottom:128px;font-size:11px;color:#3b6fb5;background:#eef4ff;border:1px solid #b9cdef;border-radius:6px;padding:2px 8px}
+</style></head>
+<body>
+<div class=title><b>AMR 皮肤③</b> 双轴可切 + 隐喻点缀 · 改动最小
+ <span class=lg>合成数据演示 · composer钉左下 / 事卡高亮右上</span></div>
+<div class=tabs><div class="tab on">👥 人视图</div><div class=tab>🗂 事视图(lifecycle看板)</div></div>
+
+<div class=stage>
+  <div class=people>
+    <h3>人 / 场</h3>
+    <div class="pc on"><div class=av>张</div><div><div class=nm>张三</div><div class=sub>客户·回款</div></div><div class="dot red"></div></div>
+    <div class=pc><div class=av>李</div><div><div class=nm>李四</div><div class=sub>客户·报价</div></div><div class="dot amber"></div></div>
+    <div class=pc><div class=av>王</div><div><div class=nm>王五</div><div class=sub>家人</div></div><div class="dot green"></div></div>
+    <div class=pc><div class=av>群</div><div><div class=nm>甲乙丙项目群</div><div class=sub>场·3方</div></div></div>
+    <div class=pc><div class=av>📢</div><div><div class=nm>新品营销群</div><div class=sub>大群·线索2</div></div></div>
+  </div>
+
+  <div class=mid>
+    <div class=msgs>
+      <div class="m in"><span class=s>张三</span><div class=bub>王总，上次说的尾款这两天能安排吗？</div></div>
+      <div class="m out"><div class=bub>这周内一定到账，今天我盯一下财务。</div></div>
+      <div class="m in"><span class=s>张三</span><div class=bub>好的，那我就放心了 👍</div></div>
+      <div class=sys>— 承诺已记入事卡 · 到期明天 —</div>
+    </div>
+    <div class=me>
+      <div class=av>王</div>
+      <div class=col>
+        <div class=who>▣ <b>我·王总</b> · 发给 <b>张三</b></div>
+        <textarea>这周内一定到账，今天我盯一下财务。</textarea>
+        <div class=drafts><span class="draft pri">✓ 用这版(倒数5s)</span><span class=draft>稳一点</span><span class=draft>给日期</span></div>
+        <div class=megear>👤 身份 · 🕘 时间窗 · 🔌 后端 · 🎨 主题 · ⚙ 更多</div>
+      </div>
+    </div>
+  </div>
+
+  <div class=right>
+    <div class=ns>
+      <div class=h>◎ 事·北极星 <span class=pill>进行</span></div>
+      <div class=b>
+        <div class=kv><span>向张三回款</span><b>¥50,000</b></div>
+        <div class=kv><span>阶段</span><b>候选›进行›等待›成交</b></div>
+        <div class=kv><span>承诺到期</span><b>明天 18:00</b></div>
+        <div class=kv><span>类型</span><span class=pill>落地A</span></div>
+      </div>
+    </div>
+    <div class=cfg>
+      <h4>该事配置</h4>
+      <div class=ln><span>lifecycle 模板</span><b>落地A</b></div>
+      <div class=ln><span>到期提醒</span><b>开</b></div>
+      <div class=ln><span>归属人</span><b>张三 +2</b></div>
+    </div>
+  </div>
+</div>
+<div class=note>右上角·事卡高亮(北极星)</div>
+<div class=note2>左下·composer 固定(我的站位)</div>
+</body></html>

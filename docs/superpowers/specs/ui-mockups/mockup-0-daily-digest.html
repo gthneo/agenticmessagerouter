@@ -1,0 +1,96 @@
+<!doctype html><html lang=zh><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>AMR·今日简报(控制台默认落地)</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.55 -apple-system,"PingFang SC",sans-serif;color:#222;background:#eef1f5;height:100vh;display:flex;flex-direction:column}
+.title{padding:6px 14px;background:#1f2530;color:#cfe;font-size:12px;display:flex;gap:10px;align-items:center}
+.title b{color:#fff;font-size:13px}.title .lg{margin-left:auto;font-size:11px;color:#9ab}
+.top{padding:12px 18px 6px;display:flex;align-items:baseline;gap:12px}
+.top h1{font-size:19px;color:#1b2330}.top .sub{font-size:12px;color:#8a93a0}
+.top .me{margin-left:auto;font-size:12px;color:#3b6fb5;font-weight:600}
+.wrap{flex:1;overflow:auto;padding:8px 18px 18px}
+/* 需你拍板 */
+.gate{background:linear-gradient(180deg,#fff7e6,#fff0cc);border:1.5px solid #f3c969;border-radius:12px;padding:10px 14px;margin-bottom:14px}
+.gate h2{font-size:13px;color:#946b00;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.gate .it{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px dashed #efdca6;font-size:13px}
+.gate .it:last-child{border:0}.gate .it .d{flex:1}
+.btn{font-size:12px;border-radius:14px;padding:3px 12px;cursor:pointer;border:1px solid #cbd8ee;background:#fff;white-space:nowrap}
+.btn.go{border-color:#46a758;background:#e9f7ee;color:#176}.btn.no{border-color:#e5b4b4;background:#fdeeee;color:#a33}
+/* 报告网格 */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.card{background:#fff;border:1px solid #e6e9ee;border-radius:12px;padding:12px 14px;box-shadow:0 2px 8px #0000000a}
+.card h3{font-size:14px;display:flex;align-items:center;gap:7px;margin-bottom:8px}
+.card .lead{font-size:13px;color:#333;background:#f6f8fb;border-radius:8px;padding:7px 9px;margin-bottom:8px;border-left:3px solid #c7d3e6}
+.stats{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap}
+.stat{font-size:12px;color:#789}.stat b{display:block;font-size:18px;color:#1b2330;line-height:1.1}
+.stat.red b{color:#e5484d}.stat.amber b{color:#cf8a00}.stat.green b{color:#2c8a45}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.drill{margin-left:auto;font-size:12px;color:#3b6fb5;cursor:pointer;align-self:center}
+.foot{font-size:11px;color:#9aa;text-align:center;padding:6px}
+.opt{font-size:10px;color:#aab;border:1px solid #dde;border-radius:8px;padding:0 5px;margin-left:6px}
+</style></head>
+<body>
+<div class=title><b>AMR·今日简报</b> 控制台默认落地 ·「人看总结、扳手柄」
+ <span class=lg>合成数据演示 · 数字员工报告 / LLM-optional</span></div>
+
+<div class=top>
+  <h1>今日简报</h1><span class=sub>2026-06-28 周日 · 数字员工已提交 6 份报告</span>
+  <span class=me>▣ 王总 · 控制台</span>
+</div>
+
+<div class=wrap>
+  <!-- 需你拍板 -->
+  <div class=gate>
+    <h2>⚖ 需你拍板（4）<span class=opt>Agent 替你 recall 出"此刻该你管的"</span></h2>
+    <div class=it><div class=d>🤝 张三 尾款承诺<b>明天到期</b> · 草稿已备「这周内到账」 → 倒数自动发?</div>
+      <span class="btn go">放行</span><span class=btn>改改</span></div>
+    <div class=it><div class=d>📢 新品营销群浮出 <b>2 条线索</b>(李客户/赵客户主动问价) → 拉小群跟进?</div>
+      <span class="btn go">建小群</span><span class=btn>稍后</span></div>
+    <div class=it><div class=d>🤝 <b>4 位客户</b>转凉(>14天未联系) → 上班时段按话术主动撩?</div>
+      <span class="btn go">放行撩</span><span class=btn>逐个看</span></div>
+    <div class=it><div class=d>🗂 「乙项目」事卡住 5 天(对方未回) → Agent 建议升级跟进话术</div>
+      <span class="btn go">采纳</span><span class="btn no">驳回</span></div>
+  </div>
+
+  <!-- 报告网格 -->
+  <div class=grid>
+    <div class=card>
+      <h3>📈 销售报告 <span class=drill>看明细 ›</span></h3>
+      <div class=lead>今日 1 单成交 ¥50,000；管道健康，2 单等待对方回。</div>
+      <div class=stats><div class="stat green"><b>1</b>今日成交</div><div class=stat><b>3</b>进行中</div><div class="stat amber"><b>2</b>等待</div><div class=stat><b>¥18万</b>在途</div></div>
+    </div>
+
+    <div class=card>
+      <h3>📢 营销报告 <span class=drill>看明细 ›</span></h3>
+      <div class=lead>新品营销群触达 312 人，浮出 2 条线索，建议转小群。</div>
+      <div class=stats><div class=stat><b>312</b>触达</div><div class="stat amber"><b>2</b>新线索</div><div class=stat><b>1</b>建议拉群</div></div>
+      <div class=acts><span class="btn go">拉小群跟进 →</span></div>
+    </div>
+
+    <div class=card>
+      <h3>🤝 关系报告 <span class=drill>看明细 ›</span></h3>
+      <div class=lead>3 位逾期该联系，4 位转凉；今日建议主动撩 4 人。</div>
+      <div class=stats><div class="stat red"><b>3</b>🔴逾期</div><div class="stat amber"><b>4</b>🟡转凉</div><div class="stat green"><b>12</b>🟢稳</div></div>
+      <div class=acts><span class="btn go">放行今日撩(4)</span><span class=btn>逐个看</span></div>
+    </div>
+
+    <div class=card>
+      <h3>🗂 业务进展报告 <span class=drill>看明细 ›</span></h3>
+      <div class=lead>5 件事推进，2 条承诺今日/明日到期，1 件卡住待你。</div>
+      <div class=stats><div class="stat green"><b>5</b>推进</div><div class="stat amber"><b>2</b>承诺到期</div><div class="stat red"><b>1</b>卡住</div></div>
+    </div>
+
+    <div class=card>
+      <h3>🧭 meta 报告 <span class=drill>看明细 ›</span></h3>
+      <div class=lead>系统健康；自动沟通昨日 9 条全部在安全区内、0 越界；2 条边界交回你。</div>
+      <div class=stats><div class="stat green"><b>9</b>自动发</div><div class=stat><b>2</b>交回人</div><div class="stat green"><b>0</b>越界</div></div>
+    </div>
+
+    <div class=card style="border-style:dashed;color:#9aa;display:flex;align-items:center;justify-content:center;min-height:120px">
+      <div style="text-align:center"><div style="font-size:22px">＋</div>报告类型可配（数字员工可扩展）</div>
+    </div>
+  </div>
+  <div class=foot>L0 今日简报 → 点任一项钻进 L1 人/事 → L2 全量深看 · 报告无 LLM 也出数字清单</div>
+</div>
+</body></html>
