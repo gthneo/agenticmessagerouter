@@ -6,7 +6,7 @@ narrative 留空字符串——LLM 可后续填(assist),无 LLM 也出数字/清
 """
 from __future__ import annotations
 
-from . import db, weighting, assist
+from . import db, weighting, assist, lifecycle
 
 
 def _sales(conn):
@@ -38,9 +38,11 @@ def _relationship(conn):
 
 
 def _progress(conn):
+    import time
     matters = db.get_matters(conn)
     open_m = [m for m in matters if m["status"] not in ("完结", "丢弃")]
-    return {"counts": {"open": len(open_m)},
+    proposals = lifecycle.propose(conn, now=time.time())
+    return {"counts": {"open": len(open_m), "proposals": len(proposals)},
             "items": open_m[:8], "narrative": "", "pending_backend": False}
 
 
