@@ -354,11 +354,12 @@ def api_add_safe_phrase(conn, payload):
 
 
 def api_delete_safe_phrase(conn, payload):
-    """话术库 — 删除一条白名单话术。"""
-    db.delete_safe_phrase(conn, int(payload["id"]))
-    db.log_event(conn, kind="safe_phrase_del", actor=payload.get("actor", "user"),
-                 detail={"id": payload.get("id")})
-    return {"ok": True}
+    """话术库 — 删除一条白名单话术。内置不可删。"""
+    ok = db.delete_safe_phrase(conn, int(payload["id"]))
+    if ok:
+        db.log_event(conn, kind="safe_phrase_del", actor=payload.get("actor", "user"),
+                     detail={"id": payload.get("id")})
+    return {"ok": ok, "error": "" if ok else "内置安全话术不可删"}
 
 
 def _auth_ok(headers, params):
@@ -1011,7 +1012,7 @@ function saveAuto(){localStorage.setItem('amr_autosend',document.getElementById(
  localStorage.setItem('amr_autosend_secs',String(Math.max(1,parseInt(document.getElementById('autosend_secs').value,10)||5)));
  toast('发送设置已存');}
 async function loadSafePhrases(){let ps;try{ps=await E('/safe-phrases');}catch(e){ps=[];}
- document.getElementById('safe_phrases').innerHTML=(ps||[]).map(p=>'<div class=row><span class=tag>'+esc(p.kind||'')+'</span> '+esc(p.pattern)+' <span class=x onclick="delSafePhrase('+p.id+')">✕</span></div>').join('')||'<div class=tag style=padding:6px>(还没灌话术，自动发安全区为空 → 一切都交人)</div>';}
+ document.getElementById('safe_phrases').innerHTML=(ps||[]).map(p=>'<div class=row><span class=tag>'+esc(p.kind||'')+'</span> '+esc(p.pattern)+' '+(p.builtin ? '<span class=tag title="内置·不可删">🔒</span>' : '<span class=x onclick="delSafePhrase('+p.id+')">✕</span>')+'</div>').join('')||'<div class=tag style=padding:6px>(还没灌话术，自动发安全区为空 → 一切都交人)</div>';}
 async function addSafePhrase(){const pat=document.getElementById('sp_pattern').value.trim();if(!pat){toast('先填话术');return;}await P('/safe-phrases',{pattern:pat,kind:document.getElementById('sp_kind').value.trim()});document.getElementById('sp_pattern').value='';document.getElementById('sp_kind').value='';toast('已灌入话术库 🛡️');loadSafePhrases();}
 async function delSafePhrase(id){await P('/safe-phrases/delete',{id});loadSafePhrases();}
 async function saveProfile(){await P('/self-profile',{profile:document.getElementById('selfprofile').value});toast('「我是谁」已保存 🧬')}

@@ -234,5 +234,6 @@ CREATE TABLE IF NOT EXISTS safe_phrases (
     id         INTEGER PRIMARY KEY,
     pattern    TEXT NOT NULL,                 -- 已批准的话术/意图模式(用户自灌)
     kind       TEXT NOT NULL DEFAULT '',      -- 寒暄/确认/FAQ...
+    builtin    INTEGER NOT NULL DEFAULT 0,   -- 1=内置(随产品发布,不可删)
     created_at INTEGER NOT NULL
 );
