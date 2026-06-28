@@ -12,6 +12,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from . import db
 from . import ingest
+from . import autocomms
 from . import digest as _digest
 from . import lifecycle as _lifecycle
 from . import recall as _recall
@@ -362,6 +363,27 @@ def api_delete_safe_phrase(conn, payload):
     return {"ok": ok, "error": "" if ok else "内置安全话术不可删"}
 
 
+def api_auto_replies(conn):
+    """监管下自动回复候选(只读·propose-only·不发)。"""
+    import time
+    return autocomms.propose_replies(conn, time.time())
+
+
+def api_set_autonomy(conn, payload):
+    ok = db.set_autonomy(conn, int(payload["conversation_id"]), payload["mode"])
+    if ok:
+        db.log_event(conn, kind="autonomy", actor=payload.get("actor", "user"),
+                     detail={"conversation_id": payload["conversation_id"], "mode": payload["mode"]})
+    return {"ok": ok, "error": "" if ok else "挡位不接受(off/observe/supervised;autonomous=Phase3)"}
+
+
+def api_killswitch(conn, payload):
+    db.set_killswitch(conn, bool(payload.get("on")))
+    db.log_event(conn, kind="killswitch", actor=payload.get("actor", "user"),
+                 detail={"on": bool(payload.get("on"))})
+    return {"ok": True, "on": bool(payload.get("on"))}
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -427,6 +449,8 @@ def make_handler(db_path):
                     return self._send(200, api_matters(conn, params))
                 if u.path == "/api/outbox":
                     return self._send(200, api_list_outbox(conn))
+                if u.path == "/api/auto-replies":
+                    return self._send(200, api_auto_replies(conn))
                 if u.path.startswith("/api/conversations/") and u.path.endswith("/suggestions"):
                     try:
                         cid = int(u.path.split("/")[3])
@@ -448,7 +472,8 @@ def make_handler(db_path):
                               "/api/matters", "/api/matters/status", "/api/diagnose",
                               "/api/self", "/api/self/remove", "/api/self/person", "/api/self/persona", "/api/self-profile",
                               "/api/reunify", "/api/watch", "/api/connect", "/api/unlink",
-                              "/api/safe-phrases", "/api/safe-phrases/delete"):
+                              "/api/safe-phrases", "/api/safe-phrases/delete",
+                              "/api/autonomy", "/api/killswitch"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -499,6 +524,10 @@ def make_handler(db_path):
                     return self._send(200, api_add_safe_phrase(conn, payload))
                 if u.path == "/api/safe-phrases/delete":
                     return self._send(200, api_delete_safe_phrase(conn, payload))
+                if u.path == "/api/autonomy":
+                    return self._send(200, api_set_autonomy(conn, payload))
+                if u.path == "/api/killswitch":
+                    return self._send(200, api_killswitch(conn, payload))
                 return self._send(200, api_cancel_outbox(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
@@ -574,7 +603,8 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 .matter .dg{color:#a40;font-size:12px;margin:3px 0}.matter .cm{color:var(--fg3);font-size:12px}
 .matter button{margin-top:4px;padding:2px 8px;border:1px solid var(--border);background:var(--panel);border-radius:6px;cursor:pointer;font-size:12px}
 #settings{position:absolute;inset:0;background:var(--bg);overflow:auto;padding:16px 20px;z-index:5}
-#settings.hide,#unify.hide,#prefs.hide{display:none}#main{position:relative}
+#autocomms{position:absolute;inset:0;background:var(--bg);overflow:auto;padding:16px 20px;z-index:5}
+#settings.hide,#unify.hide,#prefs.hide,#autocomms.hide{display:none}#main{position:relative}
 #hdr{position:relative;z-index:6;background:var(--bg)}
 #settings h2{font-size:16px;margin:18px 0 8px;border-bottom:1px solid var(--border2);padding-bottom:4px}
 #settings .row{padding:6px 0;border-bottom:1px solid var(--border2);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -690,6 +720,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  <button id=mmatters onclick="toggleMatters()" style="margin-right:8px">🩺事</button>
  <button onclick="toggleUnify()">🔄 归一</button>
  <button onclick="togglePrefs()">⭐ 偏好</button>
+ <button onclick="toggleAutocomms()">🤖 自动</button>
  <button onclick="toggleSettings()">⚙ 设置</button><b id=title>选择会话</b></div>
  <div id=unify class=hide>
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -727,6 +758,26 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
    <input id=sp_kind placeholder="类型(寒暄/确认/FAQ)" style="width:130px">
    <button class=go onclick="addSafePhrase()">➕ 添加</button>
   </div>
+ </div>
+ <div id=autocomms class=hide>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+   <b>🤖 拟自动回（监管下 · 不发）</b><button class=go onclick="toggleAutocomms()">✕ 关闭</button></div>
+  <div class=row style="margin-bottom:10px">
+   <label style="display:flex;align-items:center;gap:8px;font-size:14px">
+    <input type=checkbox id=ks_on onchange="toggleKill(this.checked)"> 🛑 全局刹车（勾选=全停·不产生任何候选）
+   </label>
+  </div>
+  <div class=tag style="display:block;margin-bottom:10px">默认全关；某会话要自动回，去会话挡位设 observe/supervised。</div>
+  <div style="margin-bottom:8px">
+   <b>当前会话挡位</b>（对 <span id=ac_curconv>（未选会话）</span>）：
+   <select id=ac_dial onchange="setAutonomyDial(this.value)" style="margin-left:6px;padding:3px 8px;border:1px solid var(--border);border-radius:6px">
+    <option value=off>off（关）</option>
+    <option value=observe>observe（观察·只摆不发）</option>
+    <option value=supervised>supervised（监管·待Task4接countdown）</option>
+   </select>
+  </div>
+  <div class=sec style="margin-bottom:8px">候选列表</div>
+  <div id=ac_list></div>
  </div>
  <div id=settings class=hide>
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -967,7 +1018,7 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
 const PERSONAS=['工作','生活','学习'];
 function personaSel(kind,id,cur){const o=PERSONAS.map(p=>`<option${p===cur?' selected':''}>${p}</option>`).join('');
  return `<select onchange="setPersona('${esc(kind)}','${esc(id)}',this.value)">${o}</select>`}
-function _hidePanels(){['unify','prefs','settings'].forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('hide');});}
+function _hidePanels(){['unify','prefs','settings','autocomms'].forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('hide');});}
 function toggleSettings(){const s=document.getElementById('settings');const was=s.classList.contains('hide');_hidePanels();if(was){s.classList.remove('hide');loadSettings();}}
 function toggleUnify(){const u=document.getElementById('unify');const was=u.classList.contains('hide');_hidePanels();if(was){u.classList.remove('hide');loadUnify();}}
 function togglePrefs(){const p=document.getElementById('prefs');const was=p.classList.contains('hide');_hidePanels();if(was){p.classList.remove('hide');loadSettings();}}
@@ -1035,6 +1086,24 @@ function goHome(){document.getElementById('title').textContent='选择会话';wi
 function toggleMatters(){document.body.classList.toggle('m-matters');}
 async function confirmLink(cid,pid){await P('/link',{conversation_id:cid,person_id:pid});
  goHome()}
+async function loadAutocomms(){let cs;try{cs=await E('/auto-replies');}catch(e){cs=[];}
+ const ic={shadow:'👁',arm:'⏳',human:'🙋'};
+ document.getElementById('ac_list').innerHTML=(cs||[]).map(c=>'<div class=row>'+
+  (ic[c.action]||'')+' [会话 '+c.conversation_id+'] '+
+  (c.action==='human'?('交你回 ('+esc(c.reason||'')+')'):
+  ((c.action==='shadow'?'本来会回(观察·不发):':'将自动发:')+'「'+esc(c.draft||'')+'」'))+'</div>').join('')
+  ||'<div class=tag style=padding:6px>(暂无候选 — 所有会话默认关；去会话挡位设 observe/supervised)</div>';}
+async function toggleKill(on){await P('/killswitch',{on});toast(on?'🛑 已全局刹车':'已恢复自动回');loadAutocomms();}
+function toggleAutocomms(){const p=document.getElementById('autocomms');const was=p.classList.contains('hide');_hidePanels();if(was){p.classList.remove('hide');loadAutocommsPanel();}}
+function loadAutocommsPanel(){
+ const dial=document.getElementById('ac_dial');
+ const lbl=document.getElementById('ac_curconv');
+ if(window.CURCONV){lbl.textContent='会话 #'+window.CURCONV;dial.disabled=false;}
+ else{lbl.textContent='（未选会话）';dial.disabled=true;}
+ loadAutocomms();}
+async function setAutonomyDial(mode){if(!window.CURCONV){toast('先选会话');return;}
+ const r=await P('/autonomy',{conversation_id:window.CURCONV,mode});
+ if(r.ok){toast('挡位已设为 '+mode);loadAutocomms();}else{toast('设挡位失败：'+(r.error||''));document.getElementById('ac_dial').value='off';}}
 document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='Enter')return;
  const h=await E('/search','q='+encodeURIComponent(e.target.value));
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
