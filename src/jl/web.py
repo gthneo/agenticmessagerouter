@@ -594,6 +594,17 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 #axis-matters .mc .t1{font-size:13px;font-weight:600}
 #axis-matters .mc .t2{font-size:11px;color:var(--fg2);margin-top:3px}
 #right .northstar{border:1.5px solid var(--accbd);background:var(--accbg)}
+#skin-anchor .anchor-grid{display:grid;grid-template-columns:1fr 300px;grid-template-rows:1fr auto;gap:12px;padding:14px;min-height:calc(100vh - 28px)}
+#skin-anchor .field{grid-row:1/2;grid-column:1/2;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px;overflow:auto}
+#skin-anchor .field h3{font-size:13px;color:var(--fg2);margin-bottom:8px}
+#skin-anchor .ns{grid-row:1/3;grid-column:2/3;background:linear-gradient(180deg,var(--accbg),var(--panel));border:1.5px solid var(--accbd);border-radius:12px;padding:12px}
+#skin-anchor .ns h3{font-size:13px;color:var(--acc);margin-bottom:8px}
+#skin-anchor .me{grid-row:2/3;grid-column:1/2;background:var(--bluebg);border:1px solid var(--bluebd);border-radius:12px;padding:12px}
+#skin-anchor .me .who{font-weight:700;color:var(--fg);margin-bottom:6px}
+#skin-anchor .gear{font-size:12px;color:var(--blue);display:flex;gap:14px;flex-wrap:wrap;margin-top:6px}
+#skin-anchor .pi{padding:6px 8px;border-bottom:1px dashed var(--border2);font-size:13px}
+#skin-anchor .pi:last-child{border:0}
+#skin-anchor .tag{font-size:11px;background:var(--accbg);color:var(--acc);border-radius:10px;padding:1px 8px}
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
 <div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
  皮肤
@@ -601,6 +612,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
   <option value=digest>今日简报</option>
   <option value=inbox>收件箱(三栏)</option>
   <option value=dual>会话双轴</option>
+  <option value=anchor>锚定矩形</option>
  </select>
 </div>
 <div id=skin-digest style="display:none;flex:1;width:100%;height:100vh;overflow:auto"></div>
@@ -608,6 +620,13 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  <div id=axisbar><span class=axt data-axis=people onclick="switchAxis('people')">👥 人视图</span><span class=axt data-axis=matters onclick="switchAxis('matters')">🗂 事视图</span></div>
  <div id=axis-people></div>
  <div id=axis-matters></div>
+</div>
+<div id=skin-anchor style="display:none;width:100%;height:100vh;overflow:auto">
+ <div class=anchor-grid>
+  <div class=field id=anchor-field></div>
+  <div class=ns id=anchor-ns></div>
+  <div class=me id=anchor-me></div>
+ </div>
 </div>
 <div id=mtab>
  <div class=mt data-skin=digest onclick="setSkin('digest')"><span>📋</span>简报</div>
@@ -673,15 +692,33 @@ function applySkin(){const s=curSkin();
  const dig=document.getElementById('skin-digest');
  const inboxEls=['side','main','right'].map(id=>document.getElementById(id)).filter(Boolean);
  const dual=document.getElementById('skin-dual');
+ const anchor=document.getElementById('skin-anchor');
  dig.style.display = s==='digest'?'block':'none';
  dual.style.display = s==='dual'?'flex':'none';
+ anchor.style.display = s==='anchor'?'block':'none';
  inboxEls.forEach(e=>e.style.display = s==='inbox'?'':'none');
  if(s==='digest')loadDigest();
  if(s==='dual')loadDual();
+ if(s==='anchor')loadAnchor();
  const sel=document.getElementById('skinsel');if(sel)sel.value=s;
  document.querySelectorAll('#mtab .mt').forEach(t=>t.classList.toggle('on',t.dataset.skin===s));}
 function setSkin(s){localStorage.setItem('amr_skin',s);applySkin();}
 function loadDual(){switchAxis(localStorage.getItem('amr_axis')||'people');}
+async function loadAnchor(){
+ let ms=[],props=[];
+ try{ms=await E('/matters');}catch(e){}
+ try{props=await E('/lifecycle/proposals');}catch(e){}
+ const open=(ms||[]).filter(m=>m.status==='open');
+ const star=open[0];
+ document.getElementById('anchor-ns').innerHTML='<h3>◎ 事·北极星</h3>'+
+  (star?'<div style="font-weight:700;font-size:15px">'+esc(star.title||'(未命名)')+'</div><div style="margin-top:4px"><span class=tag>'+esc(star.status)+'</span> '+esc(star.kind||'')+'</div>':'<div style="color:var(--fg2)">暂无进行中的事</div>')+
+  '<h3 style="margin-top:14px">该你推进</h3>'+
+  ((props||[]).length?(props.map(p=>'<div class=pi>'+esc(p.title||'')+' · <span class=tag>'+esc(p.signal||'')+'</span> '+esc(p.reason||'')+'</div>').join('')):'<div style="color:var(--fg2)">无待推进提议</div>');
+ document.getElementById('anchor-field').innerHTML='<h3>信息·能量·物质 的流动场 —— 待推进('+(props||[]).length+')</h3>'+
+  ((props||[]).length?props.map(p=>'<div class=pi>🗂 '+esc(p.title||'')+' —— '+esc(p.reason||'')+' → 建议'+esc(p.suggestion||'')+'</div>').join(''):'<div style="color:var(--fg2)">场内暂无待办（事都在推进或已结）</div>');
+ document.getElementById('anchor-me').innerHTML='<div class=who>▣ 我·站位</div>'+
+  '<div style="color:var(--fg2);font-size:12px">实际发消息在收件箱三栏 —— <button class=go onclick="setSkin(\\'inbox\\')">去收件箱</button></div>'+
+  '<div class=gear><span>👤 身份</span><span>🕘 时间窗</span><span>🔌 后端</span><span>🎨 主题</span></div>';}
 function switchAxis(a){localStorage.setItem('amr_axis',a);
  document.querySelectorAll('#axisbar .axt').forEach(t=>t.classList.toggle('on',t.dataset.axis===a));
  document.getElementById('axis-people').style.display=a==='people'?'block':'none';
