@@ -1216,7 +1216,9 @@ async function loadAutocomms(){let cs;try{cs=await E('/auto-replies');}catch(e){
  window.AUTODRAFTS={};
  document.getElementById('ac_list').innerHTML=(cs||[]).map(c=>{
   const cid=c.conversation_id,head=(ic[c.action]||'')+' [会话 '+cid+'] ';
-  if(c.action==='human')return _acRow(cid,head+'交你回 ('+esc(c.reason||'')+')');
+  // 闸二把情绪/敏感场景交回人 → 不是死胡同: 一键让 AI 拟 3 版有温度的话术供你挑发。
+  if(c.action==='human')return _acRow(cid,head+'交你回 ('+esc(c.reason||'')+') '+
+   '<button class=go onclick="humanAssist('+cid+')">✨ AI 拟有温度的话术</button>');
   if(c.action==='shadow')return _acRow(cid,head+'本来会回(观察·不发):「'+esc(c.draft||'')+'」');
   // action==='arm' — 监管挡: 人点击 → 倒计时否决窗 → 真发(outbox/confirm)
   if(c.action==='arm'){
@@ -1228,6 +1230,14 @@ async function loadAutocomms(){let cs;try{cs=await E('/auto-replies');}catch(e){
   return _acRow(cid,head+'「'+esc(c.draft||'')+'」');
  }).join('')
   ||'<div class=tag style=padding:6px>(暂无候选 — 所有会话默认关；去会话挡位设 observe/supervised)</div>';}
+async function humanAssist(cid){
+ // 「交人」(尤其闸二判情绪/敏感高风险) 不该断在这里 → 进该会话 + AI 拟 3 版有温度话术,
+ // 你挑一版有感情的→发。决策权在你, AI 把"有温度的话"备好, 顺势往下走。
+ document.getElementById('autocomms').classList.add('hide');   // 收起自动面板, 露出会话
+ await openConv(cid);                                          // 进会话(中栏消息+右栏话术区), CURCONV=cid
+ toast('正在为你拟有温度的话术…');
+ await aiDraft();                                              // /draft-assist → 3版(稳妥/直接/有温度) → 右栏「✨话术」, 用此版→发
+}
 function armAuto(cid){
  if((document.getElementById('ks_on')||{}).checked){toast('🛑 全局刹车中，不能自动发');return;}
  const draft=window.AUTODRAFTS[cid];if(draft==null){toast('草稿已失效，请刷新');return;}
