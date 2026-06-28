@@ -565,6 +565,15 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 #skin-digest .rc h3{font-size:14px;margin-bottom:8px}.rc .ld{font-size:13px;background:var(--hover);border-radius:8px;padding:7px 9px;margin-bottom:8px}
 #skin-digest .st{display:flex;gap:14px}.st .s{font-size:12px;color:var(--fg2)}.st .s b{display:block;font-size:18px;color:var(--fg)}
 #skin-digest .pend{font-size:12px;color:var(--fg2);font-style:italic}
+@media(max-width:640px){
+ #skinbar{bottom:60px}
+ #mtab{display:flex;position:fixed;left:0;right:0;bottom:0;height:50px;background:var(--panel);border-top:1px solid var(--border);z-index:40}
+ #mtab .mt{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:var(--fg2);gap:1px}
+ #mtab .mt.on{color:var(--blue)}
+ #skin-digest{padding-bottom:54px}
+ #skin-digest .grid{grid-template-columns:1fr;padding:0 12px 18px}
+ #skin-digest .gate{margin:8px 12px 12px}
+}
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
 <div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
  皮肤
@@ -574,6 +583,12 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  </select>
 </div>
 <div id=skin-digest style="display:none;flex:1;width:100%;height:100vh;overflow:auto"></div>
+<div id=mtab style="display:none">
+ <div class=mt data-skin=digest onclick="setSkin('digest')"><span>📋</span>简报</div>
+ <div class=mt data-skin=inbox onclick="setSkin('inbox')"><span>👥</span>人</div>
+ <div class=mt onclick="toast('事视图皮肤待落地')"><span>🗂</span>事</div>
+ <div class=mt onclick="toast('设置待落地')"><span>⚙</span>我</div>
+</div>
 <div id=side>
  <div class=sec>📞 该联系谁</div><div id=proactive></div>
  <div class=sec>👤 联系人</div><div id=persons></div>
@@ -633,7 +648,8 @@ function applySkin(){const s=curSkin();
  const inboxEls=['side','main','right'].map(id=>document.getElementById(id)).filter(Boolean);
  if(s==='digest'){dig.style.display='block';inboxEls.forEach(e=>e.style.display='none');loadDigest();}
  else{dig.style.display='none';inboxEls.forEach(e=>e.style.display='');}
- const sel=document.getElementById('skinsel');if(sel)sel.value=s;}
+ const sel=document.getElementById('skinsel');if(sel)sel.value=s;
+ document.querySelectorAll('#mtab .mt').forEach(t=>t.classList.toggle('on',t.dataset.skin===s));}
 function setSkin(s){localStorage.setItem('amr_skin',s);applySkin();}
 async function loadDigest(){
  let d; try{d=await E('/digest');}catch(e){d={reports:{},gate:[]};}
