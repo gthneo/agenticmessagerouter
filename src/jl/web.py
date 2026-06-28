@@ -12,6 +12,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from . import db
 from . import ingest
+from . import digest as _digest
 
 
 def api_conversations(conn, params):
@@ -320,6 +321,11 @@ def api_generate_drafts(conn, payload):
     return {"ok": n > 0, "count": n}
 
 
+def api_digest(conn):
+    """今日简报(L0 落地页):5 报告 + 需你拍板。纯只读、零 LLM。"""
+    return _digest.build(conn)
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -363,6 +369,8 @@ def make_handler(db_path):
                     return self._send(200, api_person_timeline(conn, unquote(u.path.split("/")[3])))
                 if u.path == "/api/merge-candidates":
                     return self._send(200, api_merge_candidates(conn))
+                if u.path == "/api/digest":
+                    return self._send(200, api_digest(conn))
                 if u.path == "/api/proactive":
                     return self._send(200, api_proactive(conn))
                 if u.path == "/api/self-profile":
@@ -543,7 +551,45 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  #mback,#mmatters{display:inline-block}
  .bub{max-width:82%}
 }
+#skin-digest .dtop{padding:12px 18px 6px;display:flex;align-items:baseline;gap:12px}
+#skin-digest .dtop h1{font-size:19px}.dtop .sub{font-size:12px;color:var(--fg2)}
+#skin-digest .gate{background:var(--countbg);border:1.5px solid var(--accbd);border-radius:12px;padding:10px 14px;margin:8px 18px 14px}
+#skin-digest .gate h2{font-size:13px;color:var(--acc);margin-bottom:8px}
+#skin-digest .gi{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px dashed var(--border2);font-size:13px}
+#skin-digest .gi:last-child{border:0}.gi .d{flex:1}
+#skin-digest .dbtn{font-size:12px;border-radius:14px;padding:3px 12px;cursor:pointer;border:1px solid var(--bluebd);background:var(--bg);white-space:nowrap}
+#skin-digest .dbtn.go{border-color:var(--accbd);background:var(--accbg);color:var(--acc)}
+#skin-digest .dbtn:disabled{opacity:.45;cursor:default}
+#skin-digest .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;padding:0 18px 18px}
+#skin-digest .rc{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+#skin-digest .rc h3{font-size:14px;margin-bottom:8px}.rc .ld{font-size:13px;background:var(--hover);border-radius:8px;padding:7px 9px;margin-bottom:8px}
+#skin-digest .st{display:flex;gap:14px}.st .s{font-size:12px;color:var(--fg2)}.st .s b{display:block;font-size:18px;color:var(--fg)}
+#skin-digest .pend{font-size:12px;color:var(--fg2);font-style:italic}
+#mtab{display:none}
+@media(max-width:640px){
+ #skinbar{bottom:60px}
+ #mtab{display:flex;position:fixed;left:0;right:0;bottom:0;height:50px;background:var(--panel);border-top:1px solid var(--border);z-index:40}
+ #mtab .mt{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:var(--fg2);gap:1px}
+ #mtab .mt.on{color:var(--blue)}
+ #skin-digest{padding-bottom:54px}
+ #skin-digest .grid{grid-template-columns:1fr;padding:0 12px 18px}
+ #skin-digest .gate{margin:8px 12px 12px}
+}
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
+<div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
+ 皮肤
+ <select id=skinsel onchange="setSkin(this.value)">
+  <option value=digest>今日简报</option>
+  <option value=inbox>收件箱(三栏)</option>
+ </select>
+</div>
+<div id=skin-digest style="display:none;flex:1;width:100%;height:100vh;overflow:auto"></div>
+<div id=mtab>
+ <div class=mt data-skin=digest onclick="setSkin('digest')"><span>📋</span>简报</div>
+ <div class=mt data-skin=inbox onclick="setSkin('inbox')"><span>👥</span>人</div>
+ <div class=mt onclick="toast('事视图皮肤待落地')"><span>🗂</span>事</div>
+ <div class=mt onclick="toast('设置待落地')"><span>⚙</span>我</div>
+</div>
 <div id=side>
  <div class=sec>📞 该联系谁</div><div id=proactive></div>
  <div class=sec>👤 联系人</div><div id=persons></div>
@@ -597,6 +643,39 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  <div id=matters></div>
  <div class=sec>✨ 话术 <span style="font-weight:400;color:#a40;font-size:12px">· 先🩺诊断更准</span></div><div id=suggest></div></div>
 <script>
+function curSkin(){return localStorage.getItem('amr_skin')||'digest';}
+function applySkin(){const s=curSkin();
+ const dig=document.getElementById('skin-digest');
+ const inboxEls=['side','main','right'].map(id=>document.getElementById(id)).filter(Boolean);
+ if(s==='digest'){dig.style.display='block';inboxEls.forEach(e=>e.style.display='none');loadDigest();}
+ else{dig.style.display='none';inboxEls.forEach(e=>e.style.display='');}
+ const sel=document.getElementById('skinsel');if(sel)sel.value=s;
+ document.querySelectorAll('#mtab .mt').forEach(t=>t.classList.toggle('on',t.dataset.skin===s));}
+function setSkin(s){localStorage.setItem('amr_skin',s);applySkin();}
+async function loadDigest(){
+ let d; try{d=await E('/digest');}catch(e){d={reports:{},gate:[]};}
+ document.getElementById('skin-digest').innerHTML=renderDigest(d);}
+function renderDigest(d){
+ const R=d.reports||{},g=d.gate||[];
+ const gate=g.length?('<div class=gate><h2>⚖ 需你拍板（'+g.length+'）</h2>'+
+  g.map(it=>'<div class=gi><div class=d>'+esc(it.text||'')+'</div>'+
+   (it.actionable?'<span class="dbtn go" onclick="gateGo('+JSON.stringify(it).replace(/"/g,'&quot;')+')">放行</span><span class=dbtn>改改</span>'
+    :'<span class=dbtn disabled>待后端</span>')+'</div>').join('')+'</div>'):'';
+ const card=(emoji,name,rep)=>{if(!rep)return '';
+  if(rep.pending_backend)return '<div class=rc><h3>'+emoji+' '+name+'</h3><div class=pend>待后端 · '+esc(rep.note||'')+'</div></div>';
+  const c=rep.counts||{};
+  const stats=Object.keys(c).filter(k=>typeof c[k]==='number').map(k=>'<span class=s><b>'+c[k]+'</b>'+esc(k)+'</span>').join('');
+  return '<div class=rc><h3>'+emoji+' '+name+'</h3>'+
+   (rep.narrative?'<div class=ld>'+esc(rep.narrative)+'</div>':'')+
+   '<div class=st>'+stats+'</div></div>';};
+ return '<div class=dtop><h1>今日简报</h1><span class=sub>数字员工报告 · 看总结 / 扳手柄</span></div>'+
+  gate+'<div class=grid>'+
+  card('📈','销售报告',R.sales)+card('🤝','关系报告',R.relationship)+
+  card('📢','营销报告',R.marketing)+card('🗂','业务进展',R.progress)+
+  card('🧭','meta 报告',R.meta)+'</div>';}
+function gateGo(it){
+ if(it.kind==='send_draft'){P('/outbox/confirm',{id:it.outbox_id}).then(r=>{toast(r.ok?'已发送 ✅':'失败:'+(r.error||''));loadDigest();});}
+ else{toast('已记录(撩动作走主动队列)');}}
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
 const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetch('/api'+s+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())};
@@ -800,5 +879,5 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
 document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
-loadProactive();loadPersons();loadCands();loadConvs();loadOutbox()
+loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();
 </script></body></html>"""
