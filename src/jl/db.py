@@ -1190,3 +1190,60 @@ def delete_safe_phrase(conn, phrase_id):
     conn.execute("DELETE FROM safe_phrases WHERE id=?", (phrase_id,))
     conn.commit()
     return True
+
+
+# ----- autocomms Phase-1: per-conversation autonomy + global kill switch -----
+# Safe defaults: autonomy defaults to "off", killswitch defaults to off
+# (but autonomy=off already means nothing auto-sends regardless of killswitch).
+# "autonomous" mode is Phase-3 only — v1 REJECTS it (does not silently accept).
+
+_AUTONOMY_MODES = ("off", "observe", "supervised")   # v1: autonomous 不开(Phase 3)
+
+
+def get_autonomy(conn, conversation_id: int) -> str:
+    """Return the autonomy mode for a conversation. Defaults to 'off' (safe)."""
+    r = conn.execute(
+        "SELECT mode FROM conv_autonomy WHERE conversation_id=?",
+        (conversation_id,)).fetchone()
+    return r[0] if r else "off"
+
+
+def set_autonomy(conn, conversation_id: int, mode: str) -> bool:
+    """Set autonomy mode for a conversation. Rejects unknown or Phase-3-only modes
+    (e.g. 'autonomous') — returns False and leaves the row at 'off' (or unchanged).
+    Never silently accepts an unsafe mode. Returns True on success."""
+    if mode not in _AUTONOMY_MODES:
+        return False
+    conn.execute(
+        "INSERT INTO conv_autonomy (conversation_id, mode, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(conversation_id) DO UPDATE SET mode=excluded.mode, updated_at=excluded.updated_at",
+        (conversation_id, mode, _now()))
+    conn.commit()
+    return True
+
+
+# ----- app_settings (generic key-value for global flags) --------------------
+
+def get_setting(conn, key: str, default: str = "") -> str:
+    """Read a global setting by key; returns default if not set."""
+    r = conn.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    return r[0] if r else default
+
+
+def set_setting(conn, key: str, value: str) -> None:
+    """Write (upsert) a global setting."""
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, str(value)))
+    conn.commit()
+
+
+def killswitch_on(conn) -> bool:
+    """True if the global autocomms kill switch is engaged (blocks all auto-sends)."""
+    return get_setting(conn, "autocomms_killswitch", "0") == "1"
+
+
+def set_killswitch(conn, on: bool) -> None:
+    """Engage (on=True) or release (on=False) the global autocomms kill switch."""
+    set_setting(conn, "autocomms_killswitch", "1" if on else "0")

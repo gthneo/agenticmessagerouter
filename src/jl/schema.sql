@@ -237,3 +237,17 @@ CREATE TABLE IF NOT EXISTS safe_phrases (
     builtin    INTEGER NOT NULL DEFAULT 0,   -- 1=内置(随产品发布,不可删)
     created_at INTEGER NOT NULL
 );
+
+-- 每会话自治挡位 (v1: off|observe|supervised; autonomous = Phase-3, v1 不开)
+-- 默认 off — 安全第一, 任何自动发送能力必须人工逐会话开启.
+CREATE TABLE IF NOT EXISTS conv_autonomy (
+    conversation_id INTEGER PRIMARY KEY,
+    mode            TEXT NOT NULL DEFAULT 'off',   -- off|observe|supervised  (autonomous=Phase3,v1不开)
+    updated_at      INTEGER NOT NULL
+);
+
+-- 全局键值配置 (autocomms_killswitch = "1" → 全局禁止自动发送, 默认 "0")
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
