@@ -69,7 +69,7 @@
 | `wxid` | str | 是 | 成员稳定 id（**归一锚点**，与消息 `sender_id` 同源）。 |
 | `name` | str | 是 | 群内显示名（群昵称优先；无则微信昵称）。 |
 | `alias` | str | 否 | 我给该成员的**备注名**；给得出就给（对关系账户识别有用）。 |
-| `role` | str | 否 | `"owner" \| "admin" \| "member"`；缺省按 `"member"`。 |
+| `role` | str | 否 | `"owner" \| "admin" \| "member"`；缺省按 `"member"`。**v1 只要 `owner`/`member` 足够,`admin` 可缓到 v1.1**(需真机 roomdata 标志验证;在那之前 admin 当 `member` 处理,不阻塞)。 |
 
 ---
 
@@ -131,6 +131,8 @@ Authorization: Bearer <token>
 | 群名权威性 | 本契约 `name` 为权威；与 message.canonical 会话 `name` 冲突时以本契约为准。 |
 | 成员变动 | 实时增减作为 `member_change` system 事件在 message.canonical 里**读**；本契约给的是**当前快照**，AMR 按需重拉。 |
 | 退群/解散 | `GET /api/group/{chat_id}` 返回 `{ok:false, code:"NOT_A_GROUP"}` 即可,AMR 标记该场失效。 |
+| `member_count` 权威性 | `roster:true` 时为权威值；**`roster:false` 时为 best-effort 参考值**（有权威列用列、否则解析数）。AMR 把它当**近似**「还有多少人没见过」的提示,不做精确依赖。**确认接受参考值**。 |
+| `announcement` 格式 | **必须是纯文本**(text 地板)。微信若存成 XML/protobuf 而非纯文本列 → 后端**解析成纯文本再吐;解不出就省略**(announcement 可选),**绝不把 raw XML/protobuf 透传给 AMR**。后端"只在纯文本列时吐"的现状=对。 |
 | 头像 | v1 不纳入（YAGNI）。 |
 
 ---
