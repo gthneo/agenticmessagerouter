@@ -182,6 +182,106 @@ def api_version():
     return {"amr_version": __version__, "consumes": CONSUMES}
 
 
+def _probe_backend(host, *, timeout=2):
+    """Best-effort backend version probe for /api/health. FAST + graceful: a short
+    timeout, and any failure → reachable:False / backend_version:None (never raises,
+    never blocks health on a slow backend). Reuses onboard.probe_backend_versions but
+    only surfaces the (PII-free) version — no schema/host/self_id egress here."""
+    from . import onboard
+    res = onboard.probe_backend_versions(host, token=None, timeout=timeout)
+    ver = res.get("version")
+    if not ver or ver in ("unreachable", "?"):
+        return {"reachable": False, "backend_version": None}
+    return {"reachable": True, "backend_version": ver}
+
+
+def api_health(conn, *, now=None, probe=_probe_backend, propose=None):
+    """PII-FREE ops/health projection — public, read-only, zero contact PII.
+
+    Built for an EXTERNAL 数字运维工程师 Agent to MONITOR AMR without the main
+    JL_WEB_TOKEN and without ever touching the PII-laden business endpoints
+    (/api/digest, /api/persons, /api/conversations all expose names/wxid/content).
+    HARD RULE: this returns ONLY operational metrics + state — counts, booleans,
+    versions, slot ints, timestamps. NO names, NO wxid/chat_id, NO message/draft
+    content, NO labels. `probe`/`propose`/`now` are injectable for fast, network-free
+    tests and graceful degradation. The ops Agent OBSERVES + ALERTS; control actions
+    (killswitch/autonomy/outbox confirm) stay token-gated with the human (人在回路)."""
+    import time
+    from . import autocomms
+    now = int(now if now is not None else time.time())
+
+    # autonomy: group conv_autonomy by mode; off = total convs minus those dialed.
+    total_convs = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+    dialed = conn.execute(
+        "SELECT mode, COUNT(*) FROM conv_autonomy GROUP BY mode").fetchall()
+    dialed_map = {row[0]: row[1] for row in dialed}
+    observe = int(dialed_map.get("observe", 0))
+    supervised = int(dialed_map.get("supervised", 0))
+    autonomy = {"off": int(total_convs) - observe - supervised,
+                "observe": observe, "supervised": supervised}
+
+    # auto_replies: propose_replies grouped by action. GUARDED — if slow/raises,
+    # degrade this whole field to null, never 500.
+    propose = propose or autocomms.propose_replies
+    auto_replies = None
+    try:
+        cands = propose(conn, now)
+        auto_replies = {"armed": 0, "shadow": 0, "human": 0}
+        for cand in cands:
+            act = cand.get("action")
+            if act == "arm":
+                auto_replies["armed"] += 1
+            elif act in ("shadow", "human"):
+                auto_replies[act] += 1
+    except Exception:                            # noqa: BLE001 — graceful by design
+        auto_replies = None
+
+    # outbox: pending + failed in the last 24h.
+    pending = conn.execute(
+        "SELECT COUNT(*) FROM outbox WHERE status='pending'").fetchone()[0]
+    failed_recent = conn.execute(
+        "SELECT COUNT(*) FROM outbox WHERE status='failed' AND created_at>=?",
+        (now - 86400,)).fetchone()[0]
+
+    # backends: slot/tool/reachable/backend_version ONLY. No self_id, no host (host
+    # could leak an internal LAN IP — OMITTED on purpose).
+    backends = []
+    for a in db.get_accounts(conn):
+        host = a.get("host", "")
+        if host and probe is not None:
+            try:
+                pr = probe(host)
+            except Exception:                    # noqa: BLE001 — graceful by design
+                pr = {"reachable": None, "backend_version": None}
+        else:
+            pr = {"reachable": None, "backend_version": None}
+        backends.append({
+            "slot": a["account_id"],
+            "tool": a.get("tool", ""),
+            "reachable": pr.get("reachable"),
+            "backend_version": pr.get("backend_version"),
+        })
+
+    # events_recent.errors_24h — the events table records no explicit error/failed
+    # marker (kinds are sweep/reach/send/...), so we use failed outbox in the last 24h
+    # as the error proxy (documented in the ops-API reference). Cheap and PII-free.
+    errors_24h = int(failed_recent)
+    last_ev = conn.execute("SELECT MAX(ts) FROM events").fetchone()[0]
+
+    return {
+        "amr_version": __version__,
+        "ok": True,
+        "ts": now,
+        "killswitch": db.killswitch_on(conn),
+        "autonomy": autonomy,
+        "auto_replies": auto_replies,
+        "outbox": {"pending": int(pending), "failed_recent": int(failed_recent)},
+        "backends": backends,
+        "events_recent": {"errors_24h": errors_24h},
+        "last_event_ts": int(last_ev) if last_ev is not None else None,
+    }
+
+
 def api_set_backend(conn, payload):
     tool = payload.get("tool")
     url = (payload.get("url") or "").strip()
@@ -419,6 +519,15 @@ def make_handler(db_path):
                 # identity endpoint — no token (mirror of the backend's public
                 # /api/status.version); lets an Agent/ops discover AMR before auth.
                 return self._send(200, api_version())
+            if u.path == "/api/health":
+                # PII-FREE ops/health — PUBLIC (no token, like /api/version). Lets an
+                # external 运维Agent monitor AMR (counts/state/versions only) without
+                # the main token and without touching any PII-laden business endpoint.
+                conn = db.connect(db_path)
+                try:
+                    return self._send(200, api_health(conn))
+                finally:
+                    conn.close()
             if not _auth_ok(self.headers, params):
                 return self._send(401, {"error": "unauthorized"})
             conn = db.connect(db_path)
