@@ -227,3 +227,12 @@ CREATE TABLE IF NOT EXISTS tokens (
     tokens_in    INTEGER NOT NULL DEFAULT 0,
     tokens_out   INTEGER NOT NULL DEFAULT 0
 );
+
+-- 双闸安全区·闸一: 已批准话术库 / 意图白名单 (user-curated, zero LLM).
+-- 草稿命中此表中任一条目 → 通过闸一. 闸二(LLM 风险)由调用方传入.
+CREATE TABLE IF NOT EXISTS safe_phrases (
+    id         INTEGER PRIMARY KEY,
+    pattern    TEXT NOT NULL,                 -- 已批准的话术/意图模式(用户自灌)
+    kind       TEXT NOT NULL DEFAULT '',      -- 寒暄/确认/FAQ...
+    created_at INTEGER NOT NULL
+);
