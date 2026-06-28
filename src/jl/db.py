@@ -553,8 +553,18 @@ def persons_overview(conn):
 # ----- messages -------------------------------------------------------------
 
 def insert_messages(conn, conversation_id, records):
-    """Insert MsgRecords with dedup on (conversation_id, msg_key). Returns count
-    inserted and bumps the conversation's last_activity_at to the newest ts."""
+    """Insert MsgRecords with dedup on (conversation_id, msg_key). Returns an
+    InsertResult (int-like: == inserted count, so legacy `n = insert_messages(...)`
+    callers keep working) that ALSO carries a `collisions` count.
+
+    RUNTIME CONTRACT BOUNDARY CHECK (the teeth against the 2026-06-28 故障): if an
+    incoming record's (conversation_id, msg_key) ALREADY EXISTS but with DIFFERENT
+    content or ts, that is a genuine KEY COLLISION (two different messages sharing one
+    key — e.g. msg_id = 会话内 localId 重用) — NOT a true re-poll duplicate. The
+    INSERT OR IGNORE would silently drop the new message (exactly the bug that made
+    群消息神秘不入库). We do NOT change that dedup (the first row stays); we DETECT the
+    collision, log a LOUD PII-free `contract_violation` event, and COUNT it — so the
+    next occurrence is obvious instead of silent."""
     conv = conn.execute(
         "SELECT account_id, platform FROM conversations WHERE id=?",
         (conversation_id,),
@@ -562,9 +572,23 @@ def insert_messages(conn, conversation_id, records):
     if conv is None:
         raise ValueError(f"no conversation {conversation_id}")
     inserted = 0
+    collisions = 0
     max_ts = 0
     now = _now()
     for r in records:
+        # Boundary check BEFORE the INSERT OR IGNORE: does this key already exist with
+        # a DIFFERENT (content, ts)? If so it's a true collision the IGNORE would mask.
+        existing = conn.execute(
+            "SELECT content, ts FROM messages WHERE conversation_id=? AND msg_key=?",
+            (conversation_id, r.msg_key),
+        ).fetchone()
+        if existing is not None and (existing["content"] != r.content
+                                     or existing["ts"] != r.ts):
+            collisions += 1
+            log_event(conn, kind="contract_violation", actor="ingest",
+                      detail={"type": "msg_key_collision",
+                              "conversation_id": conversation_id,
+                              "msg_key": r.msg_key})  # PII-free: ids/keys only
         cur = conn.execute(
             """INSERT OR IGNORE INTO messages
                    (conversation_id, account_id, platform, msg_key, ts, sender,
@@ -595,7 +619,25 @@ def insert_messages(conn, conversation_id, records):
             (max_ts, now, conversation_id),
         )
     conn.commit()
-    return inserted
+    return InsertResult(inserted, collisions)
+
+
+class InsertResult(int):
+    """Int-like result of insert_messages: equals the inserted-row count (so old
+    `n = insert_messages(...)` / `_, n = ingest_records(...)` callers are unchanged)
+    while also carrying the contract-boundary `collisions` count. Use collision_count()
+    to read collisions off either an InsertResult or a plain int."""
+
+    def __new__(cls, inserted, collisions=0):
+        obj = super().__new__(cls, inserted)
+        obj.collisions = int(collisions)
+        return obj
+
+
+def collision_count(result) -> int:
+    """msg_key collisions detected by insert_messages for `result`. Tolerates a plain
+    int (legacy / no collisions) → 0."""
+    return int(getattr(result, "collisions", 0))
 
 
 def ingest_records(conn, *, account_id, platform, conv, msgs):

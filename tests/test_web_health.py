@@ -62,6 +62,23 @@ def test_health_shape_basic():
     assert set(h["outbox"]) == {"pending", "failed_recent"}
     assert isinstance(h["backends"], list)
     assert "events_recent" in h and "errors_24h" in h["events_recent"]
+    assert h["contract_violations_24h"] == 0
+
+
+def test_health_contract_violations_counted():
+    """Runtime contract-boundary alarms surface as a PII-free 24h count."""
+    import time
+    c = _seed()
+    cid = c.execute("SELECT id FROM conversations LIMIT 1").fetchone()[0]
+    # a genuine msg_key collision (the 2026-06-28 bug shape) → contract_violation event
+    db.insert_messages(c, cid, [ingest.MsgRecord(msg_key="k:1", ts=100, content="A")])
+    db.insert_messages(c, cid, [ingest.MsgRecord(msg_key="k:1", ts=200, content="B")])
+    now = int(time.time())
+    h = web.api_health(c, now=now, probe=_no_probe)
+    assert h["contract_violations_24h"] == 1
+    # window is the last 24h relative to `now`: 2 days later the event has aged out
+    h2 = web.api_health(c, now=now + 2 * 86400, probe=_no_probe)
+    assert h2["contract_violations_24h"] == 0
 
 
 def test_health_killswitch_reflected():
