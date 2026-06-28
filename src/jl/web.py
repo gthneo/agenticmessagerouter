@@ -573,7 +573,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
   <option value=inbox>收件箱(三栏)</option>
  </select>
 </div>
-<div id=skin-digest style="display:none;height:100vh;overflow:auto"></div>
+<div id=skin-digest style="display:none;flex:1;width:100%;height:100vh;overflow:auto"></div>
 <div id=side>
  <div class=sec>📞 该联系谁</div><div id=proactive></div>
  <div class=sec>👤 联系人</div><div id=persons></div>
