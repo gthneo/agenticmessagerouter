@@ -340,6 +340,27 @@ def api_recall(conn, person_id, purpose="reply"):
     return _recall.recall(conn, person_id, now=time.time(), purpose=purpose)
 
 
+def api_safe_phrases(conn):
+    """话术库(双闸·闸一白名单) — 列出。"""
+    return db.get_safe_phrases(conn)
+
+
+def api_add_safe_phrase(conn, payload):
+    """话术库 — 新增一条白名单话术/意图。"""
+    pid = db.add_safe_phrase(conn, payload["pattern"], kind=payload.get("kind", ""))
+    db.log_event(conn, kind="safe_phrase_add", actor=payload.get("actor", "user"),
+                 detail={"id": pid})
+    return {"ok": True, "id": pid}
+
+
+def api_delete_safe_phrase(conn, payload):
+    """话术库 — 删除一条白名单话术。"""
+    db.delete_safe_phrase(conn, int(payload["id"]))
+    db.log_event(conn, kind="safe_phrase_del", actor=payload.get("actor", "user"),
+                 detail={"id": payload.get("id")})
+    return {"ok": True}
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -385,6 +406,8 @@ def make_handler(db_path):
                     return self._send(200, api_merge_candidates(conn))
                 if u.path == "/api/digest":
                     return self._send(200, api_digest(conn))
+                if u.path == "/api/safe-phrases":
+                    return self._send(200, api_safe_phrases(conn))
                 if u.path == "/api/lifecycle/proposals":
                     return self._send(200, api_lifecycle_proposals(conn))
                 if u.path == "/api/recall":
@@ -423,7 +446,8 @@ def make_handler(db_path):
                               "/api/suggestions/dismiss", "/api/draft-assist",
                               "/api/matters", "/api/matters/status", "/api/diagnose",
                               "/api/self", "/api/self/remove", "/api/self/person", "/api/self/persona", "/api/self-profile",
-                              "/api/reunify", "/api/watch", "/api/connect", "/api/unlink"):
+                              "/api/reunify", "/api/watch", "/api/connect", "/api/unlink",
+                              "/api/safe-phrases", "/api/safe-phrases/delete"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -470,6 +494,10 @@ def make_handler(db_path):
                     return self._send(200, api_connect(conn, payload))
                 if u.path == "/api/unlink":
                     return self._send(200, api_unlink(conn, payload))
+                if u.path == "/api/safe-phrases":
+                    return self._send(200, api_add_safe_phrase(conn, payload))
+                if u.path == "/api/safe-phrases/delete":
+                    return self._send(200, api_delete_safe_phrase(conn, payload))
                 return self._send(200, api_cancel_outbox(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
@@ -690,6 +718,14 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
    倒数 <input id=autosend_secs type=number min=1 style=width:56px> 秒
    <button class=go onclick="saveAuto()">💾 保存</button>
    <span class=tag>关掉=必须点「确认发」才发</span></div>
+  <h2>🛡️ 安全话术库（自动发白名单 · 你自己灌）</h2>
+  <div class=tag style="display:block;margin-bottom:6px">只有命中这里已批准话术的草稿，才可能进自动发（双闸闸一）；其余永远等你拍板。</div>
+  <div id=safe_phrases></div>
+  <div class=row>
+   <input id=sp_pattern placeholder="已批准话术/意图，如：收到，马上处理" style="flex:1;min-width:200px">
+   <input id=sp_kind placeholder="类型(寒暄/确认/FAQ)" style="width:130px">
+   <button class=go onclick="addSafePhrase()">➕ 添加</button>
+  </div>
  </div>
  <div id=settings class=hide>
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -961,7 +997,8 @@ async function loadSettings(){
    <button class=danger onclick="markSelf('${esc(p.id)}','${esc(p.name||p.id)}')">🪞这其实是我</button>
    <input placeholder="微信chat_id" data-pid="${esc(p.id)}">
    <button class=go onclick="connectChannel('${esc(p.id)}',this)">🔗连渠道</button></div>`
-  ).join('')||'<div class=tag style=padding:6px>(暂无已归并联系人)</div>'}
+  ).join('')||'<div class=tag style=padding:6px>(暂无已归并联系人)</div>';
+ loadSafePhrases();}
 async function markSelf(pid,name){if(!confirm('把「'+name+'」标为你自己?其身份将纳入自我、从联系人移除。'))return;
  await P('/self/person',{person_id:pid});toast('已设为自我 🪞');loadSettings()}
 async function addSelf(kind,identifier,btn){const persona=btn.parentNode.querySelector('select').value;
@@ -973,6 +1010,10 @@ async function saveBackend(tool){const url=document.getElementById('be_'+tool).v
 function saveAuto(){localStorage.setItem('amr_autosend',document.getElementById('autosend_on').checked?'1':'0');
  localStorage.setItem('amr_autosend_secs',String(Math.max(1,parseInt(document.getElementById('autosend_secs').value,10)||5)));
  toast('发送设置已存');}
+async function loadSafePhrases(){let ps;try{ps=await E('/safe-phrases');}catch(e){ps=[];}
+ document.getElementById('safe_phrases').innerHTML=(ps||[]).map(p=>'<div class=row><span class=tag>'+esc(p.kind||'')+'</span> '+esc(p.pattern)+' <span class=x onclick="delSafePhrase('+p.id+')">✕</span></div>').join('')||'<div class=tag style=padding:6px>(还没灌话术，自动发安全区为空 → 一切都交人)</div>';}
+async function addSafePhrase(){const pat=document.getElementById('sp_pattern').value.trim();if(!pat){toast('先填话术');return;}await P('/safe-phrases',{pattern:pat,kind:document.getElementById('sp_kind').value.trim()});document.getElementById('sp_pattern').value='';document.getElementById('sp_kind').value='';toast('已灌入话术库 🛡️');loadSafePhrases();}
+async function delSafePhrase(id){await P('/safe-phrases/delete',{id});loadSafePhrases();}
 async function saveProfile(){await P('/self-profile',{profile:document.getElementById('selfprofile').value});toast('「我是谁」已保存 🧬')}
 async function removeSelf(kind,identifier){await P('/self/remove',{kind,identifier});loadSettings()}
 async function runReunify(reset){
