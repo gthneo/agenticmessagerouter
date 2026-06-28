@@ -16,7 +16,8 @@ import time
 
 from . import db, gate, llm
 
-WORK_HOURS = (9, 21)   # 默认时间窗 (得体发送区间, 本地时间)；后续可每账户配
+WORK_HOURS = (9, 21)   # 默认时间窗 (得体发送区间, 北京时间)；后续可每账户配
+WORK_TZ_OFFSET_HOURS = 8   # 时间窗按北京时间(UTC+8)算, 不依赖服务器TZ(部署多为UTC)；中国无夏令时
 DAILY_CAP = 8          # 人本限频: 每会话每天自动回上限 (小, 模仿真人节奏)
 GROUP_SMALL_THRESHOLD = 10   # 群规模分挡: < 此值 = 小群(主动); >= = 大群(@我才回)。
                              # 可被 app_settings['group_small_threshold'] 覆盖。
@@ -73,8 +74,10 @@ def _draft_ack(conn, recent):
 
 
 def _in_window(now):
-    """True if `now` (unix seconds) falls inside WORK_HOURS on the local clock."""
-    h = time.localtime(now).tm_hour
+    """True if `now` (unix seconds) falls inside WORK_HOURS in **北京时间(UTC+8)**.
+    用固定偏移而非 time.localtime, 因部署服务器 TZ 多为 UTC — 否则"上班时段9-21"会按
+    UTC 算成北京 17:00-05:00(夜里发、白天静默, 完全拧)。中国无夏令时, 固定+8 即准。"""
+    h = time.gmtime(now + WORK_TZ_OFFSET_HOURS * 3600).tm_hour
     return WORK_HOURS[0] <= h < WORK_HOURS[1]
 
 

@@ -207,3 +207,18 @@ def test_result_dict_shape():
             assert "action" in r
     finally:
         c.close(); os.unlink(p)
+
+
+def test_in_window_uses_beijing_time_not_server_tz():
+    """时间窗按北京时间(UTC+8)算, 不依赖服务器 TZ(部署多为 UTC)。
+    否则"上班9-21"会被 UTC 算成北京 17:00-05:00(夜里发/白天静默, 拧了)。"""
+    import calendar
+    from jl import autocomms as ac
+
+    def utc_ts(hour):
+        return calendar.timegm((2026, 6, 28, hour, 0, 0, 0, 0, 0))
+
+    assert ac._in_window(utc_ts(2)) is True    # 北京 10:00 (UTC 02:00) → 窗内
+    assert ac._in_window(utc_ts(12)) is True   # 北京 20:00 (UTC 12:00) → 窗内
+    assert ac._in_window(utc_ts(15)) is False  # 北京 23:00 (UTC 15:00) → 窗外
+    assert ac._in_window(utc_ts(22)) is False  # 北京 06:00 (UTC 22:00) → 窗外(早于9)
