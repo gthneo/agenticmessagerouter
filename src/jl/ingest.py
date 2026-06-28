@@ -90,8 +90,11 @@ def from_canonical(env: dict, *, source: str | None = None) -> MsgRecord:
         sub = {}
     media = env.get("media") if isinstance(env.get("media"), dict) else {}
     return MsgRecord(
+        # serverId 全局唯一且稳定; msg_id 后端常=会话内 localId(位置号, 会重用/重置 →
+        # 新消息撞老 key 被 INSERT OR IGNORE 丢弃 → 不 ingest)。故优先 serverId。
         msg_key=msg_key(source=source or env.get("channel", "msg"),
-                        stable_id=env.get("msg_id") or None,
+                        stable_id=(str(env["serverId"]) if env.get("serverId")
+                                   else (env.get("msg_id") or None)),
                         ts=ts, sender=sender, content=text),
         ts=ts, content=text, sender=sender, sender_id=env.get("sender_id", "") or "",
         direction="out" if env.get("direction") == "out" else "in",

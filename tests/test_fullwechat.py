@@ -9,7 +9,7 @@ def test_map_message_to_msgrecord():
            "timestamp": "2026-06-14T08:37:05+00:00", "isMentioned": False}
     m = fw.map_message(raw)
     assert isinstance(m, ingest.MsgRecord)
-    assert m.msg_key == "fullwx:17"
+    assert m.msg_key == "fullwx:s99"   # 优先全局唯一 serverId(99), 不用会话内会重用的 localId(17)
     assert m.sender == "张三" and m.sender_id == "wxid_a"
     assert m.content == "你好"
     assert m.ts == fw._ts("2026-06-14T08:37:05+00:00")   # match adapter's own conversion

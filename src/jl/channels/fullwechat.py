@@ -150,8 +150,9 @@ def map_message(msg):
     # 否则走下面的原始 fullwechat 解析(向前兼容，后端未升级时不变)。
     if ingest.is_canonical(msg):
         return ingest.from_canonical(msg, source=SOURCE)
-    local = msg.get("localId") or 0
-    stable = str(local) if local else "s" + str(msg.get("serverId") or "")
+    # serverId 全局唯一稳定; localId 是会话内位置号(会重用/重置 → 撞键丢新消息), 故优先 serverId
+    server = msg.get("serverId") or 0
+    stable = ("s" + str(server)) if server else str(msg.get("localId") or "")
     return ingest.MsgRecord(
         msg_key=ingest.msg_key(source=SOURCE, stable_id=stable),
         ts=_ts(msg.get("timestamp")),

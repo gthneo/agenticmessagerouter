@@ -124,3 +124,17 @@ def test_fullwechat_map_message_uses_canonical_when_present():
     raw = {"localId": 9, "type": 1, "content": "hi", "senderName": "李四", "timestamp": ""}
     m2 = fw.map_message(raw)
     assert m2.type == "text" and m2.content == "hi" and m2.msg_key.startswith("fullwx:")
+
+
+def test_from_canonical_prefers_serverid_over_localid_msgid():
+    """msg_key 必须用全局唯一 serverId, 不用会话内会重用的 localId(=后端的 msg_id)。
+    否则同一会话内 localId 重置后, 新消息撞老 key 被去重丢弃 → 不 ingest(2026-06-28 实战故障)。"""
+    from jl import ingest
+    env = {"schema": "message.canonical/1", "channel": "wechat", "kind": "text",
+           "text": "新消息", "ts": 1782650121, "sender": "甲", "sender_id": "wxid_test_a",
+           "direction": "in", "msg_id": 3, "serverId": 2835619625836402720, "localId": 3}
+    rec = ingest.from_canonical(env, source="fullwx")
+    assert rec.msg_key == "fullwx:2835619625836402720"   # serverId, 不是 fullwx:3
+    # serverId 缺失时回落 msg_id
+    env2 = dict(env); env2.pop("serverId")
+    assert ingest.from_canonical(env2, source="fullwx").msg_key == "fullwx:3"
