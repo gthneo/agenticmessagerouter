@@ -584,6 +584,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 #axis-matters .mc{background:var(--bg);border:1px solid var(--border);border-left:3px solid var(--accbd);border-radius:8px;padding:8px 10px;margin-bottom:8px;cursor:pointer}
 #axis-matters .mc .t1{font-size:13px;font-weight:600}
 #axis-matters .mc .t2{font-size:11px;color:var(--fg2);margin-top:3px}
+#right .northstar{border:1.5px solid var(--accbd);background:var(--accbg)}
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
 <div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
  皮肤
@@ -678,7 +679,9 @@ function switchAxis(a){localStorage.setItem('amr_axis',a);
  document.getElementById('axis-matters').style.display=a==='matters'?'block':'none';
  if(a==='matters')loadMatterBoard();
  if(a==='people')loadDualPeople();}
-function loadDualPeople(){/* Task 3 */}
+function loadDualPeople(){document.getElementById('axis-people').innerHTML=
+ '<div style="padding:24px;color:var(--fg2);font-size:14px">👥 人视图沿用收件箱三栏（左人 / 中会话 / 右事卡）。'+
+ '<div style="margin-top:10px"><button class=go onclick="setSkin(\\'inbox\\')">切到收件箱三栏</button></div></div>';}
 const STAGE_ORDER=['候选','进行','等待','阻塞','完结'];
 async function loadMatterBoard(){
  let ms; try{ms=await E('/matters');}catch(e){ms=[];}
@@ -796,12 +799,12 @@ async function openConv(id){window.CURCONV=id;cancelSend();document.body.classLi
  const sp=window.SCROLLPOS[id];ms.scrollTop=sp!=null?sp:ms.scrollHeight;  // 上次离开的位置，没有则到最新
  loadSuggestions(id);loadMatters(id)}
 async function loadMatters(id){const ms=await E('/matters','conversation='+id);
- document.getElementById('matters').innerHTML=ms.map(m=>{
+ document.getElementById('matters').innerHTML=ms.map((m,i)=>{
  const d=m.diagnosis||{};const dg=d['一句话诊断']?`<div class=dg>🩺 ${esc(d['一句话诊断'])}</div>`:'';
  const cm=(m.commitments||[]).map(c=>`<div class=cm>📌 ${esc(c.text)} <span class=badge>${esc(c.status)}</span></div>`).join('');
  const dx=`<button onclick="diagnose(${m.id})">🩺 诊断</button>`;
  const act=m.status==='open'?`<button onclick="matterStatus(${m.id},'handled')">✓ 办结</button>`:`<span class=badge>${esc(m.status)}</span>`;
- return `<div class=matter><div class=h>${esc(m.title)} ${m.kind?`<span class=badge>${esc(m.kind)}</span>`:''}</div>${dg}${cm}${dx} ${act}</div>`}).join('')||'<div class=p style=padding:8px>(暂无事项，＋记一件事)</div>'}
+ return `<div class="matter${i===0?' northstar':''}"><div class=h>${esc(m.title)} ${m.kind?`<span class=badge>${esc(m.kind)}</span>`:''}</div>${dg}${cm}${dx} ${act}</div>`}).join('')||'<div class=p style=padding:8px>(暂无事项，＋记一件事)</div>'}
 async function diagnose(mid){if(!window.CURCONV)return;
  const r=await P('/diagnose',{matter_id:mid,conversation_id:window.CURCONV});
  if(!r.ok){alert(r.error||'诊断失败');return}loadMatters(window.CURCONV)}
