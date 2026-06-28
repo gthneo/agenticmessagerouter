@@ -14,6 +14,7 @@ from . import db
 from . import ingest
 from . import digest as _digest
 from . import lifecycle as _lifecycle
+from . import recall as _recall
 
 
 def api_conversations(conn, params):
@@ -333,6 +334,12 @@ def api_lifecycle_proposals(conn):
     return _lifecycle.propose(conn, now=time.time())
 
 
+def api_recall(conn, person_id, purpose="reply"):
+    """记忆层 recall 显著上下文包(只读、零 LLM)。"""
+    import time
+    return _recall.recall(conn, person_id, now=time.time(), purpose=purpose)
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -380,6 +387,8 @@ def make_handler(db_path):
                     return self._send(200, api_digest(conn))
                 if u.path == "/api/lifecycle/proposals":
                     return self._send(200, api_lifecycle_proposals(conn))
+                if u.path == "/api/recall":
+                    return self._send(200, api_recall(conn, params.get("person", ""), params.get("purpose", "reply")))
                 if u.path == "/api/proactive":
                     return self._send(200, api_proactive(conn))
                 if u.path == "/api/self-profile":
