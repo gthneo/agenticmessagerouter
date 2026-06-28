@@ -223,7 +223,9 @@ class FullWechatAdapter(ingest.IngestAdapter):
                                      headers={"Authorization": "Bearer " + self.token,
                                               "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            # GUI 自动化发送(开会话→打字→点发送)偶尔 >30s, 给足 60s 避免把"还在发"
+            # 误报成"timed out 失败"(读取路径仍 30s, 读很快)。
+            with urllib.request.urlopen(req, timeout=60) as r:
                 res = json.loads(r.read().decode("utf-8", "replace"))
         except Exception as e:  # surface any transport error to the human
             return False, str(e)
