@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 
-from . import db, gate
+from . import db, gate, llm
 
 WORK_HOURS = (9, 21)   # 默认时间窗 (得体发送区间, 本地时间)；后续可每账户配
 DAILY_CAP = 8          # 人本限频: 每会话每天自动回上限 (小, 模仿真人节奏)
@@ -88,26 +88,48 @@ def _under_rate(conn, cid, now):
     return True   # noqa: SIM110
 
 
-def _llm_verdict(conn, draft):
-    """获取 LLM 风险判定: 'low' | 'high' | None.
+_RISK_SYSTEM = (
+    "你是自动回复的安全闸 (SAFETY GATE)。系统准备把一条预设的「确认/寒暄」回复**自动发出**, "
+    "由你判定这次自动发送的风险。只输出一个单词: `low` 或 `high`, 不要解释。\n"
+    "- 仅当把这条回复自动发给该入站消息是**明显无害且得体**时答 `low`: "
+    "纯寒暄/确认收到, 不含任何承诺、金额/付款、情绪/抱怨/投诉、敏感或私密话题。\n"
+    "- 入站消息若是抱怨、情绪化、催款、涉钱、纠纷、敏感, 或你有任何疑虑 → 答 `high`。\n"
+    "拿不准就答 `high` (保守优先, 把判断交回人)。"
+)
 
-    v1 保守实现: 直接返回 None (等同 LLM 不可用).
-    效果: 双闸闸二不过 → action 不会是 'arm' (→ needs_llm → human).
-    这是 Phase 1 的刻意选择: Phase 2 在此接入真实 LLM 风险打分.
 
-    如果将来接入 LLM:
-        from . import llm
-        if not llm.available():
-            return None
-        try:
-            res = llm.complete([...], task="risk_classify")
-            if res.ok:
-                return "low" if "低" in res.text or "low" in res.text.lower() else "high"
-        except Exception:
-            pass
-        return None
+def _llm_verdict(conn, draft, *, inbound=None):
+    """闸二: LLM 在上下文中判定「这条预设回复能否自动发」→ 'low' | 'high' | None.
+
+    inbound = 我们将要自动回复的那条最新入站消息文本, 让模型**结合上下文**判风险
+    (同一句确认, 若入站是投诉/情绪/涉钱, 仍是高风险)。
+
+    返回语义 (保守优先, 见 §6 / HITL 铁律):
+        'low'  — 模型明确判低风险, 闸二放行 → 可进入 arm。
+        'high' — 模型判高风险或任何非空的模糊回答 → 交人。
+        None   — LLM 不可用 / 调用失败 / 空回答 / 抛异常 →「没有 assist」, 等同交人。
+                 失败 ≠ 'high': 调用本身失败时不替模型拍 high, 而是回到人 (同不可用)。
     """
-    return None   # Phase 1: conservative — no LLM risk check, everything goes to human
+    if not llm.available():
+        return None
+    messages = [
+        {"role": "system", "content": _RISK_SYSTEM},
+        {"role": "user", "content":
+            "【预设回复(将自动发出)】\n" + (draft or "") +
+            "\n\n【入站消息(我们要回复的对象)】\n" + (inbound or "(无)") +
+            "\n\n请只回答 low 或 high。"},
+    ]
+    try:
+        res = llm.complete(messages, task="risk_classify", conn=conn)
+    except Exception:
+        return None   # provider 抛异常 → 没 assist → 交人
+    if not res.ok or not (res.text or "").strip():
+        return None   # 调用失败 / 空回答 → 交人 (不替模型拍 high)
+    t = res.text.strip().lower()
+    # 明确判低才放行: 文本等于/以 "low" 开头, 或含 "低" 且不含 "高"/"high"
+    if t == "low" or t.startswith("low") or ("低" in t and "高" not in t and "high" not in t):
+        return "low"
+    return "high"   # 其余任何非空回答 → 高风险 → 交人
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +183,9 @@ def propose_replies(conn, now):
             })
             continue
 
-        verdict = gate.classify(conn, draft, llm_verdict=_llm_verdict(conn, draft))
+        inbound = recent[-1].get("content")   # 最新入站文本 (供闸二上下文判风险)
+        verdict = gate.classify(
+            conn, draft, llm_verdict=_llm_verdict(conn, draft, inbound=inbound))
         okw = _in_window(now)
         okr = _under_rate(conn, cv["id"], now)
 
