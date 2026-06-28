@@ -492,6 +492,100 @@ def api_killswitch(conn, payload):
     return {"ok": True, "on": bool(payload.get("on"))}
 
 
+# ----- PII-FREE UI telemetry (AI 时代 UI 自优化回路) -------------------------
+# HARD RULE: never store contact names / wxid / chat_id / message content / input
+# values / arbitrary innerText. Enforced by WHITELISTING here on the server too (the
+# client only emits curated data-ui names, but we never trust the client): closed
+# `action` set, `ui` capped + charset-restricted, only the 4 allowed per-event keys
+# are read, EVERY other key (incl. smuggled top-level keys) is ignored.
+_UITRACE_ACTIONS = {"click", "click-unnamed", "skin", "rage", "deadend", "nav"}
+_UI_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+_UI_MAX = 40
+_SESSION_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+_SESSION_MAX = 64
+_UITRACE_BATCH_MAX = 500
+
+
+def _clean_ui(v):
+    """A ui name is a short, stable, charset-restricted control name — NOT free text
+    (a contact name would be PII). Reject anything that isn't, so text can't sneak in."""
+    if not isinstance(v, str) or not v or len(v) > _UI_MAX:
+        return None
+    if any(c not in _UI_OK for c in v):
+        return None
+    return v
+
+
+def api_uitrace_config(conn):
+    """Expose the telemetry enabled flag to the client (default ON: single-user own
+    system, PII-free, local). Client logger no-ops when disabled."""
+    return {"enabled": db.get_setting(conn, "ui_trace_enabled", "1") == "1"}
+
+
+def api_uitrace(conn, payload):
+    """Accept {session, events:[{action, ui, ts, n?}]} and store ONLY the whitelisted,
+    PII-free fields. Reads nothing else off the payload (smuggled name/wxid/chat_id/
+    content/input keys are simply never looked at). Returns {stored, dropped}."""
+    if db.get_setting(conn, "ui_trace_enabled", "1") != "1":
+        return {"stored": 0, "dropped": 0, "disabled": True}
+    session = payload.get("session", "")
+    if not isinstance(session, str) or len(session) > _SESSION_MAX \
+            or any(c not in _SESSION_OK for c in session):
+        return {"stored": 0, "dropped": 0, "error": "bad session"}
+    raw = payload.get("events") or []
+    if not isinstance(raw, list):
+        return {"stored": 0, "dropped": 0, "error": "bad events"}
+    clean, dropped = [], 0
+    for e in raw[:_UITRACE_BATCH_MAX]:
+        if not isinstance(e, dict) or e.get("action") not in _UITRACE_ACTIONS:
+            dropped += 1
+            continue
+        ui = _clean_ui(e.get("ui", ""))
+        if ui is None and e.get("ui", "") != "":
+            dropped += 1
+            continue
+        # Rebuild from the closed key set only — never pass arbitrary keys downstream.
+        clean.append({"action": e["action"], "ui": ui or "",
+                      "n": int(e.get("n", 0) or 0) if str(e.get("n", 0)).lstrip("-").isdigit() else 0,
+                      "ts": int(e.get("ts", 0) or 0) if str(e.get("ts", 0)).lstrip("-").isdigit() else 0})
+    stored = db.insert_ui_trace(conn, session, clean)
+    return {"stored": stored, "dropped": dropped + (len(raw) - len(raw[:_UITRACE_BATCH_MAX]))}
+
+
+def uireview_report(conn, *, window_days=None, limit=15):
+    """Aggregate ui_trace into a PII-free, AI-readable友好 summary: top-clicked controls,
+    rage-click hotspots (friction), dead-end hotspots, nav/skin patterns, unnamed-click
+    volume (signals untracked controls). `window_days=None` → all time."""
+    import time
+    where, args = "", []
+    if window_days:
+        where = "WHERE recorded_at >= ?"
+        args.append(int(time.time()) - int(window_days) * 86400)
+
+    def _q(extra, params=()):
+        return conn.execute(
+            f"SELECT ui, COUNT(*) c FROM ui_trace {where}{' AND' if where else 'WHERE'} {extra} "
+            f"GROUP BY ui ORDER BY c DESC, ui LIMIT ?", (*args, *params, limit)).fetchall()
+
+    top_clicks = [{"ui": r["ui"], "count": r["c"]} for r in _q("action='click'")]
+    rage = [{"ui": r["ui"], "count": r["c"]} for r in _q("action='rage'")]
+    deadend = [{"ui": r["ui"], "count": r["c"]} for r in _q("action='deadend'")]
+    skins = [{"ui": r["ui"], "count": r["c"]} for r in _q("action='skin'")]
+    unnamed = conn.execute(
+        f"SELECT COUNT(*) FROM ui_trace {where}{' AND' if where else 'WHERE'} action='click-unnamed'",
+        args).fetchone()[0]
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM ui_trace {where}", args).fetchone()[0]
+    sessions = conn.execute(
+        f"SELECT COUNT(DISTINCT session) FROM ui_trace {where}", args).fetchone()[0]
+    return {
+        "window_days": window_days, "total_events": total, "sessions": sessions,
+        "top_clicks": top_clicks, "rage_hotspots": rage,
+        "deadend_hotspots": deadend, "skin_switches": skins,
+        "unnamed_clicks": unnamed,
+    }
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -519,6 +613,14 @@ def make_handler(db_path):
                 # identity endpoint — no token (mirror of the backend's public
                 # /api/status.version); lets an Agent/ops discover AMR before auth.
                 return self._send(200, api_version())
+            if u.path == "/api/uitrace/config":
+                # PII-free telemetry on/off flag — public (no token), like /api/version;
+                # the page reads it before deciding whether to log. No data egress.
+                conn = db.connect(db_path)
+                try:
+                    return self._send(200, api_uitrace_config(conn))
+                finally:
+                    conn.close()
             if u.path == "/api/health":
                 # PII-FREE ops/health — PUBLIC (no token, like /api/version). Lets an
                 # external 运维Agent monitor AMR (counts/state/versions only) without
@@ -594,7 +696,8 @@ def make_handler(db_path):
                               "/api/self", "/api/self/remove", "/api/self/person", "/api/self/persona", "/api/self-profile",
                               "/api/reunify", "/api/watch", "/api/connect", "/api/unlink",
                               "/api/safe-phrases", "/api/safe-phrases/delete",
-                              "/api/autonomy", "/api/killswitch"):
+                              "/api/autonomy", "/api/killswitch",
+                              "/api/uitrace", "/api/uitrace/toggle"):
                 return self._send(404, {"error": "not found"})
             length = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -649,6 +752,11 @@ def make_handler(db_path):
                     return self._send(200, api_set_autonomy(conn, payload))
                 if u.path == "/api/killswitch":
                     return self._send(200, api_killswitch(conn, payload))
+                if u.path == "/api/uitrace":
+                    return self._send(200, api_uitrace(conn, payload))
+                if u.path == "/api/uitrace/toggle":
+                    db.set_setting(conn, "ui_trace_enabled", "1" if payload.get("on") else "0")
+                    return self._send(200, {"ok": True, "enabled": bool(payload.get("on"))})
                 return self._send(200, api_cancel_outbox(conn, payload))
             except (KeyError, TypeError) as e:
                 return self._send(400, {"error": f"bad payload: {e}"})
@@ -803,7 +911,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
 <div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
  皮肤
- <select id=skinsel onchange="setSkin(this.value)">
+ <select id=skinsel data-ui=skin-switcher onchange="setSkin(this.value)">
   <option value=digest>今日简报</option>
   <option value=inbox>收件箱(三栏)</option>
   <option value=dual>会话双轴</option>
@@ -834,15 +942,15 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  <div class=sec>👤 联系人</div><div id=persons></div>
  <div class=sec>📤 待发送 outbox</div><div id=outbox></div>
  <div class=sec>🔗 待确认归并</div><div id=cands></div>
- <div class=sec>💬 会话 <label style="float:right;font-weight:400;font-size:12px;cursor:pointer"><input type=checkbox id=show_groups onchange="loadConvs()"> 显示群</label></div>
+ <div class=sec>💬 会话 <label style="float:right;font-weight:400;font-size:12px;cursor:pointer"><input type=checkbox id=show_groups data-ui=show-groups onchange="loadConvs()"> 显示群</label></div>
  <div style=padding:8px><input id=q placeholder="🔍 搜索消息 (回车)"></div><div id=list></div></div>
-<div id=main><div id=hdr><button id=mback onclick="goHome()" style="margin-right:8px">← 列表</button>
- <button onclick="goHome()" style="margin-right:8px">← 收件箱</button>
- <button id=mmatters onclick="toggleMatters()" style="margin-right:8px">🩺事</button>
- <button onclick="toggleUnify()">🔄 归一</button>
- <button onclick="togglePrefs()">⭐ 偏好</button>
- <button onclick="toggleAutocomms()">🤖 自动</button>
- <button onclick="toggleSettings()">⚙ 设置</button><b id=title>选择会话</b></div>
+<div id=main><div id=hdr><button id=mback data-ui=tab-back-list onclick="goHome()" style="margin-right:8px">← 列表</button>
+ <button data-ui=tab-inbox onclick="goHome()" style="margin-right:8px">← 收件箱</button>
+ <button id=mmatters data-ui=tab-matters onclick="toggleMatters()" style="margin-right:8px">🩺事</button>
+ <button data-ui=tab-unify onclick="toggleUnify()">🔄 归一</button>
+ <button data-ui=tab-prefs onclick="togglePrefs()">⭐ 偏好</button>
+ <button data-ui=tab-autocomms onclick="toggleAutocomms()">🤖 自动</button>
+ <button data-ui=tab-settings onclick="toggleSettings()">⚙ 设置</button><b id=title>选择会话</b></div>
  <div id=unify class=hide>
   <div style="display:flex;justify-content:space-between;align-items:center">
    <b>🔄 归一工作台</b><button class=go onclick="toggleUnify()">✕ 关闭</button></div>
@@ -885,13 +993,13 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
    <b>🤖 拟自动回（监管下 · 不发）</b><button class=go onclick="toggleAutocomms()">✕ 关闭</button></div>
   <div class=row style="margin-bottom:10px">
    <label style="display:flex;align-items:center;gap:8px;font-size:14px">
-    <input type=checkbox id=ks_on onchange="toggleKill(this.checked)"> 🛑 全局刹车（勾选=全停·不产生任何候选）
+    <input type=checkbox id=ks_on data-ui=killswitch onchange="toggleKill(this.checked)"> 🛑 全局刹车（勾选=全停·不产生任何候选）
    </label>
   </div>
   <div class=tag style="display:block;margin-bottom:10px">默认全关；某会话要自动回，去会话挡位设 observe/supervised。</div>
   <div style="margin-bottom:8px">
    <b>当前会话挡位</b>（对 <span id=ac_curconv>（未选会话）</span>）：
-   <select id=ac_dial onchange="setAutonomyDial(this.value)" style="margin-left:6px;padding:3px 8px;border:1px solid var(--border);border-radius:6px">
+   <select id=ac_dial data-ui=autonomy-dial onchange="setAutonomyDial(this.value)" style="margin-left:6px;padding:3px 8px;border:1px solid var(--border);border-radius:6px">
     <option value=off>off（关）</option>
     <option value=observe>observe（观察·只摆不发）</option>
     <option value=supervised>supervised（监管·待Task4接countdown）</option>
@@ -904,6 +1012,12 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
   <div style="display:flex;justify-content:space-between;align-items:center">
    <b>⚙ 设置（运维）</b><button class=go onclick="toggleSettings()">✕ 关闭设置</button></div>
   <div class=tag style="margin:4px 0;display:block">用户一般不碰；现场 Build / 运维 Agent 才需要。</div>
+  <div class=row style="margin:6px 0">
+   <label style="display:flex;align-items:center;gap:8px">
+    <input type=checkbox id=uitrace_on data-ui=uitrace-toggle onchange="toggleUitrace(this.checked)"> 📊 UI 交互埋点（PII-free · 本地 · 喂 AI 优化 UI）
+   </label>
+   <span class=tag>只记控件名/换皮肤/卡点，绝不记姓名/内容/输入</span>
+  </div>
   <div class=acc><div class=ah onclick="accTog(this)">▸ 🔌 接入后端（可填 FQDN 域名）</div>
    <div class=ab>
     <div class=row><span class=tag>fullwechat</span>
@@ -917,8 +1031,8 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  <div id=msgs></div>
  <div id=countbar class=hide></div>
  <div id=replybox><textarea id=reply rows=2 placeholder="选右侧话术或自己打字 → 发送后倒数自动发，倒数内可「改改」"></textarea>
- <span id=sendbar><button onclick="armSend()">发送 →</button></span>
- <button onclick="aiDraft()">✨ AI 拟话术</button></div></div>
+ <span id=sendbar><button data-ui=send onclick="armSend()">发送 →</button></span>
+ <button data-ui=ai-draft onclick="aiDraft()">✨ AI 拟话术</button></div></div>
 <div id=right>
  <button id=mclose onclick="toggleMatters()">← 返回会话</button>
  <div class=sec>🗂 事（这条会话）<button onclick="createMatter()" style="float:right;font-size:12px">＋记一件事</button></div>
@@ -983,7 +1097,7 @@ function renderDigest(d){
  const R=d.reports||{},g=d.gate||[];
  const gate=g.length?('<div class=gate><h2>⚖ 需你拍板（'+g.length+'）</h2>'+
   g.map(it=>'<div class=gi><div class=d>'+esc(it.text||'')+'</div>'+
-   (it.actionable?'<span class="dbtn go" onclick="gateGo('+JSON.stringify(it).replace(/"/g,'&quot;')+')">放行</span><span class=dbtn>改改</span>'
+   (it.actionable?'<span class="dbtn go" data-ui=digest-gate-go onclick="gateGo('+JSON.stringify(it).replace(/"/g,'&quot;')+')">放行</span><span class=dbtn data-ui=digest-gate-edit>改改</span>'
     :'<span class=dbtn disabled>待后端</span>')+'</div>').join('')+'</div>'):'';
  const card=(emoji,name,rep)=>{if(!rep)return '';
   if(rep.pending_backend)return '<div class=rc><h3>'+emoji+' '+name+'</h3><div class=pend>待后端 · '+esc(rep.note||'')+'</div></div>';
@@ -1063,8 +1177,8 @@ function armSend(){if(!window.CURCONV){alert('先选会话');return;}
   const who=window.NAMES[window.CURCONV]||'对方',cfg=autoCfg(),c=document.getElementById('countbar');
   c.className='';
   const bar=(head,goLabel)=>{c.innerHTML=head+
-    ' <button class=go onclick="doSend()">'+goLabel+'</button>'+
-    ' <button id=cancelbtn onclick="cancelEdit()">改改</button>';
+    ' <button class=go data-ui=confirm-send onclick="doSend()">'+goLabel+'</button>'+
+    ' <button id=cancelbtn data-ui=edit-draft onclick="cancelEdit()">改改</button>';
     const cb=document.getElementById('cancelbtn');if(cb)cb.focus();};
   if(cfg.on){let left=cfg.secs;
     const tick=()=>bar('<span class=cd>⏳ '+left+'s</span><span class=txt>后自动发给 '+esc(who)+'：'+esc(body)+'</span>','立即发');
@@ -1106,7 +1220,7 @@ async function loadSuggestions(id){const s=await E('/conversations/'+id+'/sugges
  window.SUG={};s.forEach(x=>window.SUG[x.id]=x.body);
  document.getElementById('suggest').innerHTML=(s.length?'<div class=p>✨ '+(s[0].kind==='opener'?'主动开场':'话术')+'（用此版填入下方，可改）:</div>':'')+
  s.map(x=>`<div class=ob><div class=p>[${esc(x.stance)}]</div><div class=b>${esc(x.body)}</div>
- <button onclick="useDraft(${x.id})">用此版</button> <button onclick="dismissSug(${x.id})">✕</button></div>`).join('')}
+ <button data-ui=use-draft onclick="useDraft(${x.id})">用此版</button> <button data-ui=dismiss-draft onclick="dismissSug(${x.id})">✕</button></div>`).join('')}
 function useDraft(id){const r=document.getElementById('reply');r.value=window.SUG[id]||'';armSend();}
 async function aiDraft(){if(!window.CURCONV){alert('先选会话');return}
  const r=await P('/draft-assist',{conversation_id:window.CURCONV});
@@ -1129,8 +1243,8 @@ async function openPerson(id){const m=await E('/persons/'+encodeURIComponent(id)
  document.getElementById('msgs').innerHTML=renderBubbles(m,{platform:true});}
 async function loadProactive(){const ps=await E('/proactive');document.getElementById('proactive').innerHTML=
  ps.map(p=>{const tag=p.red?'🔴':(p.watch?'⭐':'');const days=p.days!=null?p.days+'天':'';
- if(p.missing_channel)return `<div class=conv><div class=n>${tag} ${esc(p.name)} <span class=badge>缺渠道·救补</span></div><div class=p>${days} · 补微信/飞书号再拟</div></div>`;
- return `<div class=conv onclick="openConv(${p.conversation_id})"><div class=n>${tag} ${esc(p.name)} ${p.openers?`<span class=badge>${p.openers}版开场</span>`:''}</div><div class=p>${days}${p.openers?' · 点开挑/改/发':' · 待拟'}</div></div>`}).join('')||'<div class=p style=padding:8px>(无 关注/🔴 待联络)</div>'}
+ if(p.missing_channel)return `<div class=conv data-ui=proactive-item><div class=n>${tag} ${esc(p.name)} <span class=badge>缺渠道·救补</span></div><div class=p>${days} · 补微信/飞书号再拟</div></div>`;
+ return `<div class=conv data-ui=proactive-item onclick="openConv(${p.conversation_id})"><div class=n>${tag} ${esc(p.name)} ${p.openers?`<span class=badge>${p.openers}版开场</span>`:''}</div><div class=p>${days}${p.openers?' · 点开挑/改/发':' · 待拟'}</div></div>`}).join('')||'<div class=p style=padding:8px>(无 关注/🔴 待联络)</div>'}
 async function loadCands(){const cs=await E('/merge-candidates');document.getElementById('cands').innerHTML=
  cs.map(c=>`<div class=cand><div class=n>${esc(c.name||c.peer)} <span class=badge>${esc(c.platform)}</span></div>
  <div class=p>本会话标识：${esc(c.peer)}</div>
@@ -1154,6 +1268,7 @@ async function loadSettings(){
  {const cfg=autoCfg();document.getElementById('autosend_on').checked=cfg.on;document.getElementById('autosend_secs').value=cfg.secs;}
  {const t=localStorage.getItem('amr_theme')||'system';const el=document.querySelector('input[name=theme][value="'+t+'"]');if(el)el.checked=true;}
  {const b=await E('/backends');if(b){document.getElementById('be_fullwechat').value=b.fullwechat||'';document.getElementById('be_powerdata').value=b.powerdata||'';}}
+ {try{const u=await fetch('/api/uitrace/config').then(r=>r.json());const el=document.getElementById('uitrace_on');if(el)el.checked=!!(u&&u.enabled);}catch(e){}}
  const prof=await E('/self-profile');document.getElementById('selfprofile').value=(prof&&prof.profile)||'';
  const d=await E('/self');
  document.getElementById('self_reg').innerHTML=(d.registered||[]).map(s=>
@@ -1223,14 +1338,14 @@ async function loadAutocomms(){let cs;try{cs=await E('/auto-replies');}catch(e){
   const cid=c.conversation_id,head=(ic[c.action]||'')+' [会话 '+cid+'] ';
   // 闸二把情绪/敏感场景交回人 → 不是死胡同: 一键让 AI 拟 3 版有温度的话术供你挑发。
   if(c.action==='human')return _acRow(cid,head+'交你回 ('+esc(c.reason||'')+') '+
-   '<button class=go onclick="humanAssist('+cid+')">✨ AI 拟有温度的话术</button>');
+   '<button class=go data-ui=ai-warm-draft onclick="humanAssist('+cid+')">✨ AI 拟有温度的话术</button>');
   if(c.action==='shadow')return _acRow(cid,head+'本来会回(观察·不发):「'+esc(c.draft||'')+'」');
   // action==='arm' — 监管挡: 人点击 → 倒计时否决窗 → 真发(outbox/confirm)
   if(c.action==='arm'){
    if(ksOn)return _acRow(cid,head+'🛑 全局刹车中(不可自动发):「'+esc(c.draft||'')+'」');
    window.AUTODRAFTS[cid]=c.draft||'';   // stash draft; lookup by cid at arm/send time
    return _acRow(cid,head+'将自动发:「'+esc(c.draft||'')+'」 '+
-    '<button class=go onclick="armAuto('+cid+')">▶ 将自动发（倒计时可否决）</button>');
+    '<button class=go data-ui=arm onclick="armAuto('+cid+')">▶ 将自动发（倒计时可否决）</button>');
   }
   return _acRow(cid,head+'「'+esc(c.draft||'')+'」');
  }).join('')
@@ -1250,8 +1365,8 @@ function armAuto(cid){
  const row=document.getElementById('acrow_'+cid);if(!row)return;
  const cfg=autoCfg();let left=Math.max(1,cfg.secs);
  const tick=()=>{row.innerHTML='⏳ <b>'+left+'s</b> 后自动发给 [会话 '+cid+']：「'+esc(draft)+'」 '+
-   '<button class=go onclick="doAutoSend('+cid+')">立即发</button> '+
-   '<button onclick="vetoAuto('+cid+')">✕ 否决</button>';};
+   '<button class=go data-ui=auto-send-now onclick="doAutoSend('+cid+')">立即发</button> '+
+   '<button data-ui=veto onclick="vetoAuto('+cid+')">✕ 否决</button>';};
  tick();
  window.AUTOTIMERS[cid]=setInterval(()=>{left--;if(left<=0){doAutoSend(cid);}else{tick();}},1000);
 }
@@ -1283,9 +1398,74 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
 document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
 loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();
+// ---- PII-FREE UI 交互埋点 (AI 时代 UI 自优化回路) ----------------------------
+// 白名单设计: 只追踪带 data-ui 的有名控件 + 换皮肤/开关面板/rage-click/死胡同。
+// 绝不记联系人名/wxid/chat_id/消息内容/输入值/任意 innerText (点中的联系人名=PII)。
+// 默认开 (单用户自有系统·PII-free·本地); ⚙设置可关; 右下角 📊 表示开启 (透明)。
+var UITRACE=(function(){
+ var enabled=false, q=[], sess='', last={}, lastPanel=null, lastPanelT=0;
+ function mkid(){var s='';var a='abcdefghijklmnopqrstuvwxyz0123456789';
+  for(var i=0;i<16;i++)s+=a.charAt(Math.floor(Math.random()*a.length));return s;}
+ function clean(u){ // 二次保险: 客户端也只放行短·受限字符集的控件名 (非文本=非 PII)
+  if(typeof u!=='string'||!u||u.length>40)return null;
+  return /^[A-Za-z0-9_-]+$/.test(u)?u:null;}
+ function push(ev){if(!enabled)return;q.push(ev);if(q.length>=200)flush();}
+ function rec(action,ui,n){var u=clean(ui);if(action!=='click-unnamed'&&u===null)return;
+  push({action:action,ui:u||ui,ts:Date.now(),n:n||0});}
+ function nearestUi(el){while(el&&el!==document.body){if(el.getAttribute){
+   var v=el.getAttribute('data-ui');if(v)return v;}el=el.parentElement;}return null;}
+ function onClick(e){var t=e.target;var ui=nearestUi(t);
+  if(ui){ // rage: 同一 ui 2 秒内 >=3 次 → 摩擦点
+   var now=Date.now();var L=last[ui];
+   if(L&&now-L.t<2000){L.n++;L.t=now;if(L.n>=3){rec('rage',ui,L.n);L.n=0;}}
+   else last[ui]={t:now,n:1};
+   rec('click',ui);}
+  else{ // 无 data-ui → 只记 tagName 计数 (永不记文本), 信号: 有控件没埋点
+   var tag=(t.tagName||'').toLowerCase();if(tag)rec('click-unnamed',tag);}}
+ function flush(useBeacon){if(!enabled||!q.length)return;
+  var body=JSON.stringify({session:sess,events:q});q=[];
+  var url='/api/uitrace'+(TOK?'?token='+encodeURIComponent(TOK):'');
+  if(useBeacon&&navigator.sendBeacon){navigator.sendBeacon(url,body);}
+  else{try{fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body,keepalive:true});}catch(e){}}}
+ // 死胡同 1: 搜索框聚焦后 6 秒内没在搜索结果里点任何东西 → 搜了白搜
+ function watchSearch(){var box=document.getElementById('q');if(!box)return;
+  box.addEventListener('focus',function(){var armed=true;
+   var msgs=document.getElementById('msgs');
+   var clear=function(){armed=false;if(msgs)msgs.removeEventListener('click',clear);};
+   if(msgs)msgs.addEventListener('click',clear);
+   setTimeout(function(){if(armed)rec('deadend','search');clear();},6000);});}
+ // 死胡同 2: 开了覆盖面板后 2 秒内就关掉、没在面板里点任何有名控件 → 开了又退
+ function watchPanels(){document.addEventListener('click',function(e){
+   var ui=nearestUi(e.target)||'';
+   if(ui.indexOf('tab-')===0){var now=Date.now();
+    if(lastPanel&&lastPanel===ui&&now-lastPanelT<2000)rec('deadend',ui);
+    lastPanel=ui;lastPanelT=now;}},true);}
+ function start(cfg){enabled=!!(cfg&&cfg.enabled);
+  var dot=document.getElementById('uitrace_dot');if(dot)dot.style.display=enabled?'block':'none';
+  var box=document.getElementById('uitrace_on');if(box)box.checked=enabled;
+  if(!enabled)return;
+  sess=mkid();
+  document.addEventListener('click',onClick,true);
+  watchSearch();watchPanels();
+  setInterval(function(){flush(false);},10000);
+  document.addEventListener('visibilitychange',function(){if(document.hidden)flush(true);});
+  window.addEventListener('beforeunload',function(){flush(true);});}
+ return {start:start,rec:rec,setEnabled:function(on){enabled=on;
+   var dot=document.getElementById('uitrace_dot');if(dot)dot.style.display=on?'block':'none';
+   if(on&&!sess)start({enabled:true});}};
+})();
+function toggleUitrace(on){P('/uitrace/toggle',{on:on}).then(function(r){
+  UITRACE.setEnabled(!!(r&&r.enabled));toast(on?'📊 UI 埋点已开 (PII-free)':'UI 埋点已关');});}
+// 换皮肤是导航信号 — 包一层 setSkin 记录 (皮肤名是白名单·非 PII)
+(function(){var _ss=window.setSkin;window.setSkin=function(s){
+  if(window.UITRACE)UITRACE.rec('skin',s);return _ss(s);};})();
+fetch('/api/uitrace/config').then(function(r){return r.json();})
+ .then(function(c){UITRACE.start(c);}).catch(function(){});
 </script><div class=fab onclick="createMatter()">＋ 记一件事</div>
 <div id=amrver title="AMR 版本（消费侧）· /api/version 看消费清单">AMR v__AMR_VERSION__</div>
-<style>#amrver{position:fixed;right:8px;bottom:6px;z-index:5;font-size:10px;color:var(--fg2);opacity:.55;pointer-events:none;letter-spacing:.3px}</style>
+<div id=uitrace_dot title="UI 交互埋点开启中（PII-free·本地）— ⚙设置可关" style="display:none">📊</div>
+<style>#amrver{position:fixed;right:8px;bottom:6px;z-index:5;font-size:10px;color:var(--fg2);opacity:.55;pointer-events:none;letter-spacing:.3px}
+#uitrace_dot{position:fixed;right:8px;bottom:20px;z-index:5;font-size:11px;opacity:.5;pointer-events:none}</style>
 </body></html>"""
 
 

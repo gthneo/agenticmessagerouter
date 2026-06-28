@@ -1246,6 +1246,24 @@ def set_setting(conn, key: str, value: str) -> None:
     conn.commit()
 
 
+def insert_ui_trace(conn, session: str, events) -> int:
+    """Persist PII-FREE UI-telemetry rows. `events` are pre-validated dicts with only
+    the closed column set (action/ui/n/ts); this layer does NOT validate (the endpoint
+    does) — it just writes the whitelisted fields, never any extra key. Returns count."""
+    now = _now()
+    rows = [
+        (session, e["action"], e.get("ui", ""), int(e.get("n", 0) or 0),
+         int(e.get("ts", 0) or 0), now)
+        for e in events
+    ]
+    if rows:
+        conn.executemany(
+            "INSERT INTO ui_trace (session, action, ui, n, ts, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)", rows)
+        conn.commit()
+    return len(rows)
+
+
 def killswitch_on(conn) -> bool:
     """True if the global autocomms kill switch is engaged (blocks all auto-sends)."""
     return get_setting(conn, "autocomms_killswitch", "0") == "1"

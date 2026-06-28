@@ -90,6 +90,9 @@ def route(args):
                             "chat_id": rest[1] if len(rest) > 1 else None})
     if a in ("电话归一", "dedup-phone"):
         return ("dedup_phone", {})
+    if a in ("uireview", "ui审计", "ui-review"):
+        wd = _opt_value(args, "--days")
+        return ("uireview", {"window_days": int(wd) if wd else None})
     if a in ("logs", "日志"):
         return ("logs", {"level": _opt_value(args, "--level"),
                          "component": _opt_value(args, "--component")})
@@ -421,6 +424,35 @@ def cmd_logs(conn, ctx):
         print(f"  [{time.strftime('%m-%d %H:%M', time.localtime(r['ts']))}] {r['level']:<5} {r['component']:<10} {r['msg']}")
     if not rows:
         print("  (无日志)")
+
+
+def cmd_uireview(conn, ctx):
+    """PII-free UI-telemetry digest — the AI-facing「人在哪卡」自明性审计 input.
+    Surfaces top-clicked controls, rage-click + dead-end friction hotspots, skin/nav
+    patterns and unnamed-click volume (signals untracked controls) over a window."""
+    from . import web
+    wd = ctx.get("window_days")
+    rep = web.uireview_report(conn, window_days=wd)
+    span = f"近 {wd} 天" if wd else "全部"
+    print(f"\n📊 UI 交互自明性审计（PII-free · {span}）")
+    print(f"   事件 {rep['total_events']} · 会话 {rep['sessions']} · 未命名点击 {rep['unnamed_clicks']}"
+          " （未命名多 → 有控件没埋 data-ui）")
+    if not rep["total_events"]:
+        print("   (暂无埋点数据 — 开 jl web 用一会儿再看)")
+        return
+    print("\n  🔥 rage-click 摩擦热点（人在这反复点 → 卡住/没反应）:")
+    for r in rep["rage_hotspots"] or [{"ui": "(无)", "count": 0}]:
+        print(f"     {r['ui']:<20} ×{r['count']}")
+    print("\n  🚧 dead-end 死胡同（开了又退/搜了没点 → 找不到出口）:")
+    for r in rep["deadend_hotspots"] or [{"ui": "(无)", "count": 0}]:
+        print(f"     {r['ui']:<20} ×{r['count']}")
+    print("\n  👆 高频点击控件（人最常用的入口）:")
+    for r in rep["top_clicks"][:10]:
+        print(f"     {r['ui']:<20} ×{r['count']}")
+    if rep["skin_switches"]:
+        print("\n  🎨 皮肤切换:")
+        for r in rep["skin_switches"]:
+            print(f"     {r['ui']:<20} ×{r['count']}")
 
 
 def cmd_dedup_phone(conn, ctx):
@@ -801,6 +833,8 @@ def main(argv=None):
         ctx.update(params); cmd_connect(conn, ctx)
     elif command == "dedup_phone":
         cmd_dedup_phone(conn, ctx)
+    elif command == "uireview":
+        ctx.update(params); cmd_uireview(conn, ctx)
     elif command == "logs":
         ctx.update(params); cmd_logs(conn, ctx)
     elif command == "unlink":
