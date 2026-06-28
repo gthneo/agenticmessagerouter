@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agenticmessagerouter"
-version = "0.9.2"
+version = "0.10.0"
 description = "jl — relationship-account router: multi-channel last-interaction audit with human-in-the-loop"
 requires-python = ">=3.10"
 dependencies = []
