@@ -13,6 +13,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from . import db
 from . import ingest
 from . import digest as _digest
+from . import lifecycle as _lifecycle
 
 
 def api_conversations(conn, params):
@@ -326,6 +327,12 @@ def api_digest(conn):
     return _digest.build(conn)
 
 
+def api_lifecycle_proposals(conn):
+    """事生命周期「待推进提议」(只读、确定性、零 LLM)。"""
+    import time
+    return _lifecycle.propose(conn, now=time.time())
+
+
 def _auth_ok(headers, params):
     want = os.environ.get("JL_WEB_TOKEN")
     if not want:
@@ -371,6 +378,8 @@ def make_handler(db_path):
                     return self._send(200, api_merge_candidates(conn))
                 if u.path == "/api/digest":
                     return self._send(200, api_digest(conn))
+                if u.path == "/api/lifecycle/proposals":
+                    return self._send(200, api_lifecycle_proposals(conn))
                 if u.path == "/api/proactive":
                     return self._send(200, api_proactive(conn))
                 if u.path == "/api/self-profile":
