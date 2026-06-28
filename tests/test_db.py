@@ -98,6 +98,16 @@ def test_account_tool_round_trips(conn):
     assert {a["account_id"]: a for a in db.get_accounts(conn)}[4]["tool"] == "fullwechat"
 
 
+def test_next_account_id_starts_at_one_when_empty(conn):
+    assert db.next_account_id(conn) == 1
+
+
+def test_next_account_id_is_max_plus_one(conn):
+    db.upsert_account(conn, account_id=1, platform="wechat", self_id="wxid_test_a")
+    db.upsert_account(conn, account_id=4, platform="wechat", self_id="wxid_test_b")
+    assert db.next_account_id(conn) == 5   # max(1,4)+1, not count+1
+
+
 def test_ensure_columns_adds_tool_on_old_accounts_db():
     # simulate an OLD db whose accounts table predates the tool column → re-init adds it
     c = db.connect(":memory:")

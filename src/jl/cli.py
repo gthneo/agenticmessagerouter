@@ -3,6 +3,7 @@
   jl              full sweep + weighted coloring
   jl <名>         single-person deep dive
   jl 救补          missing wxid/phone queue
+  jl person refresh-name [<名>]  display name → 最新会话名 (dry-run → --commit)
   jl --migrate    persons.json -> SQLite (idempotent)
   jl --dump-yaml  human-readable view of the SQLite truth
   jl --tokens     token-usage + reach feedback
@@ -93,7 +94,49 @@ def route(args):
     if a in ("解绑", "unlink"):
         cid = args[1] if len(args) > 1 and not args[1].startswith("--") else None
         return ("unlink", {"conversation_id": int(cid) if cid else None})
+    if a in ("account", "账号"):
+        return _route_account(args[1:])
+    if a in ("person", "人"):
+        return _route_person(args[1:])
     return ("detail", {"name": a})
+
+
+# the per-account flags `account add|set` accepts: CLI --kebab → plan key
+_ACCOUNT_FLAGS = {
+    "--platform": "platform", "--tool": "tool", "--host": "host",
+    "--self-id": "self_id", "--label": "label", "--token-file": "token_file",
+}
+
+
+def _route_account(rest):
+    """Sub-route `jl account <sub> ...`. ls | add | set <id>, plus --commit/--yes
+    (write only on confirm; default is a dry-run that prints the plan)."""
+    sub = rest[0] if rest and not rest[0].startswith("--") else "ls"
+    params = {"sub": sub, "commit": ("--commit" in rest or "--yes" in rest)}
+    tail = rest[1:]
+    if sub == "set":
+        aid = tail[0] if tail and not tail[0].startswith("--") else None
+        params["account_id"] = int(aid) if aid is not None else None
+        tail = tail[1:] if aid is not None else tail
+    if sub in ("add", "set"):
+        flags = {}
+        for cli_flag, key in _ACCOUNT_FLAGS.items():
+            v = _opt_value(rest, cli_flag)
+            if v is not None:
+                flags[key] = v
+        params["flags"] = flags
+    return ("account", params)
+
+
+def _route_person(rest):
+    """Sub-route `jl person <sub> ...`. Today only refresh-name [<id-or-name>],
+    plus --commit/--yes (write only on confirm; default is a dry-run). Room for
+    future person subcommands; only refresh-name is built (YAGNI)."""
+    sub = rest[0] if rest and not rest[0].startswith("--") else "refresh-name"
+    tail = rest[1:] if rest and not rest[0].startswith("--") else rest
+    target = next((x for x in tail if not x.startswith("--")), None)
+    return ("person", {"sub": sub, "target": target,
+                       "commit": ("--commit" in rest or "--yes" in rest)})
 
 
 def days_str(days):
@@ -460,6 +503,125 @@ def cmd_proactive(conn, ctx):
                  detail={"drafted": len(out["drafted"]), "missing": len(out["missing_channel"])})
 
 
+# ----- account onboarding ---------------------------------------------------
+
+def cmd_account(conn, params):
+    """Productized per-account backend onboarding (jl account ls|add|set).
+
+    add/set go through an explicit HITL gate: by default a DRY-RUN that prints
+    exactly what will change; pass --commit (or --yes) to actually write. No
+    silent fire-and-forget; the token contents are never printed."""
+    from . import onboard
+    sub = params.get("sub", "ls")
+    if sub == "ls":
+        return _account_ls(conn)
+    if sub not in ("add", "set"):
+        print(f"❌ 未知子命令: account {sub} (支持: ls / add / set)")
+        return
+    if sub == "add" and not params["flags"].get("token_file"):
+        print("用法: jl account add --platform wechat --tool fullwechat \\\n"
+              "        --host http://HOST:6174 --self-id <wxid> --label \"<名>\" \\\n"
+              "        --token-file <后端token副本路径> [--commit]")
+        return
+    try:
+        plan = onboard.build_plan(conn, op=sub,
+                                  account_id=params.get("account_id"),
+                                  flags=params["flags"])
+    except ValueError as e:
+        print(f"❌ {e}")
+        return
+    _print_account_plan(plan)
+    if not params.get("commit"):
+        print("\n这是 dry-run。确认无误后加 --commit（或 --yes）真正写入。")
+        return
+    onboard.apply_plan(conn, plan)
+    db.log_event(conn, kind="account_" + sub, actor=_actor(),
+                 detail={"account_id": plan["account_id"],
+                         "tool": plan["after"]["tool"],
+                         "host": plan["after"]["host"],
+                         "copy_token": plan["copy_token"]})
+    print(f"\n✅ account #{plan['account_id']} 已{'登记' if sub == 'add' else '更新'}"
+          f"（tool={plan['after']['tool']} host={plan['after']['host']}）。"
+          f"\n   下一步: jl poll 拉新 → 在 Web 收件箱把该 self_id 确认进 SELF(我)。")
+
+
+def _account_ls(conn):
+    accts = db.get_accounts(conn)
+    print(f"\n📇 账号 accounts — 共 {len(accts)} 个")
+    print(f"{'id':<4} {'platform':<9} {'tool':<11} {'self_id':<22} {'host':<28} label")
+    print("─" * 90)
+    for a in accts:
+        print(f"{a['account_id']:<4} {a['platform']:<9} {(a.get('tool') or '-'):<11} "
+              f"{(a.get('self_id') or '-'):<22} {(a.get('host') or '-'):<28} {a.get('label') or ''}")
+    if not accts:
+        print("  (无账号 — jl account add 登记第一个后端)")
+
+
+def _print_account_plan(plan):
+    """Render the before→after summary that gates the write. Never prints token bytes."""
+    a = plan["after"]
+    verb = "新增" if plan["op"] == "add" else "更新"
+    print(f"\n⚙️ account {verb}计划 — account_id #{plan['account_id']}")
+    if plan["op"] == "set":
+        b = plan["before"]
+        print("  字段         before → after")
+        for k in ("platform", "tool", "host", "self_id", "label", "cred_ref"):
+            bv, av = b.get(k) or "-", a.get(k) or "-"
+            mark = "  ←改" if bv != av else ""
+            print(f"  {k:<11}  {bv} → {av}{mark}")
+    else:
+        for k in ("platform", "tool", "host", "self_id", "label", "cred_ref"):
+            print(f"  {k:<11}  {a.get(k) or '-'}")
+    if plan["copy_token"]:
+        print(f"  token-file   {plan['token_file']}  →  {plan['cred_dest']}  (chmod 600)")
+    else:
+        print("  token-file   (未提供 — cred_ref 保持不变)")
+
+
+# ----- person actions -------------------------------------------------------
+
+def cmd_person(conn, params):
+    """Productized person actions (jl person refresh-name [<id-或-名>]).
+
+    refresh-name syncs a person's stale display name to its primary/linked
+    conversation's roster-fresh name (ingest keeps the conversation name fresh;
+    persons.name does not auto-update). Goes through the same HITL gate as
+    `jl account`: default DRY-RUN prints the before→after table and writes
+    nothing; pass --commit (or --yes) to apply the UPDATE(s) + audit each."""
+    from . import person as person_mod
+    sub = params.get("sub", "refresh-name")
+    if sub != "refresh-name":
+        print(f"❌ 未知子命令: person {sub} (支持: refresh-name)")
+        return
+    target = params.get("target")
+    pid = None
+    if target is not None:
+        p = _find_person(conn, target)
+        if not p:
+            names = ", ".join(x["name"] for x in db.get_persons(conn))
+            print(f"❌ 找不到 {target}. 可选: {names}")
+            return
+        pid = p["id"]
+    plan = person_mod.name_refresh_plan(conn, person_id=pid)
+    if not plan:
+        scope = f"{target}" if target is not None else "全员"
+        print(f"\n✅ 名字刷新 — {scope}: 无需更新（display name 与最新会话名已一致）。")
+        return
+    print(f"\n🔤 名字刷新计划 — 共 {len(plan)} 人 (display name → 最新会话名):")
+    print(f"  {'person_id':<16} {'当前名 (old)':<18} {'新名 (after)'}")
+    print("  " + "─" * 56)
+    for d in plan:
+        print(f"  {d['person_id']:<16} {d['old']:<18} → {d['new']}")
+    if not params.get("commit"):
+        print("\n这是 dry-run，未写库。确认无误后加 --commit（或 --yes）真正更新。")
+        return
+    person_mod.apply_name_refresh(conn, plan)
+    for d in plan:
+        db.log_event(conn, kind="name_refresh", person_id=d["person_id"],
+                     actor=_actor(), detail={"from": d["old"], "to": d["new"]})
+    print(f"\n✅ 已更新 {len(plan)} 人的 display name（每条已写审计 events）。")
+
+
 # ----- helpers --------------------------------------------------------------
 
 def _find_person(conn, name):
@@ -532,6 +694,10 @@ def main(argv=None):
         ctx.update(params); cmd_logs(conn, ctx)
     elif command == "unlink":
         ctx.update(params); cmd_unlink(conn, ctx)
+    elif command == "account":
+        cmd_account(conn, params)
+    elif command == "person":
+        cmd_person(conn, params)
     else:
         _DISPATCH[command](conn, ctx)
     conn.close()
