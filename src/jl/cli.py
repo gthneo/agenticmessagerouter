@@ -259,19 +259,50 @@ def cmd_ignite(conn, ctx):
     print(f"✅ 点火完成 [{ch}]: 新增 {n} 条消息入库 (account #{aid})")
 
 
+def _fullwechat_targets(conn):
+    """所有 tool=fullwechat 的账号 → [(account_id, url, token), ...].
+    url = account.host 或默认; token = account.cred_ref 文件内容 或默认。
+    按账号绑后端(Router 命门)。若无配置账号, 回退到 [(1, default_url, default_token)]。
+    """
+    import os as _os
+    from .channels.fullwechat import _default_url, _token
+    out = []
+    for a in db.get_accounts(conn):
+        if a.get("tool") != "fullwechat":
+            continue
+        url = (a.get("host") or "").strip() or _default_url()
+        token = None
+        cred = (a.get("cred_ref") or "").strip()
+        if cred:
+            p = _os.path.expanduser(cred)
+            if _os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    token = f.read().strip()
+        out.append((a["account_id"], url, token or _token()))
+    if not out:
+        out = [(1, _default_url(), _token())]
+    return out
+
+
 def cmd_poll(conn, ctx):
     import time as _t
     from .channels.fullwechat import FullWechatAdapter, DEFAULT_URL
     from . import ingest_run
-    aid = _ensure_account(conn, 1, "wechat", "fullwechat #1", DEFAULT_URL)
+    _ensure_account(conn, 1, "wechat", "fullwechat #1", DEFAULT_URL)  # 确保默认账号存在
     interval = ctx.get("interval", 300)
     print(f"🔁 poll 每 {interval}s 拉新 (Ctrl-C 停)")
     while True:
-        n = ingest_run.ignite(conn, FullWechatAdapter(), account_id=aid, actor="poll")
+        total = 0
+        for aid, url, token in _fullwechat_targets(conn):
+            try:
+                total += ingest_run.ignite(conn, FullWechatAdapter(url=url, token=token),
+                                           account_id=aid, actor="poll")
+            except Exception as e:
+                print(f"  [poll] acct {aid} @ {url} 失败: {e}")
         db.apply_self_directions(conn)  # 回灌的自我发出消息标 direction=out (右绿气泡)
         from . import assist as _assist
         _assist.transcribe_sweep(conn)   # 语音转写(LLM-optional·无ASR则空转)
-        print(f"  [{_t.strftime('%H:%M:%S')}] +{n}")
+        print(f"  [{_t.strftime('%H:%M:%S')}] +{total}")
         _t.sleep(interval)
 
 
