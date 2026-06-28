@@ -551,6 +551,20 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  #mback,#mmatters{display:inline-block}
  .bub{max-width:82%}
 }
+#skin-digest .dtop{padding:12px 18px 6px;display:flex;align-items:baseline;gap:12px}
+#skin-digest .dtop h1{font-size:19px}.dtop .sub{font-size:12px;color:var(--fg2)}
+#skin-digest .gate{background:var(--countbg);border:1.5px solid var(--accbd);border-radius:12px;padding:10px 14px;margin:8px 18px 14px}
+#skin-digest .gate h2{font-size:13px;color:var(--acc);margin-bottom:8px}
+#skin-digest .gi{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px dashed var(--border2);font-size:13px}
+#skin-digest .gi:last-child{border:0}.gi .d{flex:1}
+#skin-digest .dbtn{font-size:12px;border-radius:14px;padding:3px 12px;cursor:pointer;border:1px solid var(--bluebd);background:var(--bg);white-space:nowrap}
+#skin-digest .dbtn.go{border-color:var(--accbd);background:var(--accbg);color:var(--acc)}
+#skin-digest .dbtn:disabled{opacity:.45;cursor:default}
+#skin-digest .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;padding:0 18px 18px}
+#skin-digest .rc{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+#skin-digest .rc h3{font-size:14px;margin-bottom:8px}.rc .ld{font-size:13px;background:var(--hover);border-radius:8px;padding:7px 9px;margin-bottom:8px}
+#skin-digest .st{display:flex;gap:14px}.st .s{font-size:12px;color:var(--fg2)}.st .s b{display:block;font-size:18px;color:var(--fg)}
+#skin-digest .pend{font-size:12px;color:var(--fg2);font-style:italic}
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
 <div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
  皮肤
@@ -621,7 +635,30 @@ function applySkin(){const s=curSkin();
  else{dig.style.display='none';inboxEls.forEach(e=>e.style.display='');}
  const sel=document.getElementById('skinsel');if(sel)sel.value=s;}
 function setSkin(s){localStorage.setItem('amr_skin',s);applySkin();}
-function loadDigest(){/* Task 4 实现 */}
+async function loadDigest(){
+ let d; try{d=await E('/digest');}catch(e){d={reports:{},gate:[]};}
+ document.getElementById('skin-digest').innerHTML=renderDigest(d);}
+function renderDigest(d){
+ const R=d.reports||{},g=d.gate||[];
+ const gate=g.length?('<div class=gate><h2>⚖ 需你拍板（'+g.length+'）</h2>'+
+  g.map(it=>'<div class=gi><div class=d>'+esc(it.text||'')+'</div>'+
+   (it.actionable?'<span class="dbtn go" onclick="gateGo('+JSON.stringify(it).replace(/"/g,'&quot;')+')">放行</span><span class=dbtn>改改</span>'
+    :'<span class=dbtn disabled>待后端</span>')+'</div>').join('')+'</div>'):'';
+ const card=(emoji,name,rep)=>{if(!rep)return '';
+  if(rep.pending_backend)return '<div class=rc><h3>'+emoji+' '+name+'</h3><div class=pend>待后端 · '+esc(rep.note||'')+'</div></div>';
+  const c=rep.counts||{};
+  const stats=Object.keys(c).filter(k=>typeof c[k]==='number').map(k=>'<span class=s><b>'+c[k]+'</b>'+esc(k)+'</span>').join('');
+  return '<div class=rc><h3>'+emoji+' '+name+'</h3>'+
+   (rep.narrative?'<div class=ld>'+esc(rep.narrative)+'</div>':'')+
+   '<div class=st>'+stats+'</div></div>';};
+ return '<div class=dtop><h1>今日简报</h1><span class=sub>数字员工报告 · 看总结 / 扳手柄</span></div>'+
+  gate+'<div class=grid>'+
+  card('📈','销售报告',R.sales)+card('🤝','关系报告',R.relationship)+
+  card('📢','营销报告',R.marketing)+card('🗂','业务进展',R.progress)+
+  card('🧭','meta 报告',R.meta)+'</div>';}
+function gateGo(it){
+ if(it.kind==='send_draft'){P('/outbox/confirm',{id:it.outbox_id}).then(r=>{toast(r.ok?'已发送 ✅':'失败:'+(r.error||''));loadDigest();});}
+ else{toast('已记录(撩动作走主动队列)');}}
 const TOK=new URLSearchParams(location.search).get('token')||'';
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
 const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetch('/api'+s+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())};
