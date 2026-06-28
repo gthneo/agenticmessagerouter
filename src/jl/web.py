@@ -565,6 +565,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 #skin-digest .rc h3{font-size:14px;margin-bottom:8px}.rc .ld{font-size:13px;background:var(--hover);border-radius:8px;padding:7px 9px;margin-bottom:8px}
 #skin-digest .st{display:flex;gap:14px}.st .s{font-size:12px;color:var(--fg2)}.st .s b{display:block;font-size:18px;color:var(--fg)}
 #skin-digest .pend{font-size:12px;color:var(--fg2);font-style:italic}
+#mtab{display:none}
 @media(max-width:640px){
  #skinbar{bottom:60px}
  #mtab{display:flex;position:fixed;left:0;right:0;bottom:0;height:50px;background:var(--panel);border-top:1px solid var(--border);z-index:40}
@@ -583,7 +584,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  </select>
 </div>
 <div id=skin-digest style="display:none;flex:1;width:100%;height:100vh;overflow:auto"></div>
-<div id=mtab style="display:none">
+<div id=mtab>
  <div class=mt data-skin=digest onclick="setSkin('digest')"><span>📋</span>简报</div>
  <div class=mt data-skin=inbox onclick="setSkin('inbox')"><span>👥</span>人</div>
  <div class=mt onclick="toast('事视图皮肤待落地')"><span>🗂</span>事</div>
