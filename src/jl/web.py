@@ -614,6 +614,12 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 #skin-anchor .pi{padding:6px 8px;border-bottom:1px dashed var(--border2);font-size:13px}
 #skin-anchor .pi:last-child{border:0}
 #skin-anchor .tag{font-size:11px;background:var(--accbg);color:var(--acc);border-radius:10px;padding:1px 8px}
+#settings .acc{border:1px solid var(--border);border-radius:8px;margin:6px 0}
+#settings .acc .ah{padding:9px 12px;cursor:pointer;font-size:13px;color:var(--fg3)}
+#settings .acc.open .ah{border-bottom:1px solid var(--border);color:var(--fg)}
+#settings .acc .ab{display:none;padding:8px 12px}
+#settings .acc.open .ab{display:block}
+.fab{position:fixed;right:18px;bottom:74px;z-index:30;background:var(--accbg);border:1.5px solid var(--accbd);color:var(--acc);border-radius:22px;padding:9px 15px;font-weight:700;font-size:14px;box-shadow:0 6px 18px #0005;cursor:pointer}
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
 <div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
  皮肤
@@ -653,22 +659,26 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 <div id=main><div id=hdr><button id=mback onclick="goHome()" style="margin-right:8px">← 列表</button>
  <button onclick="goHome()" style="margin-right:8px">← 收件箱</button>
  <button id=mmatters onclick="toggleMatters()" style="margin-right:8px">🩺事</button>
+ <button onclick="toggleUnify()">🔄 归一</button>
+ <button onclick="togglePrefs()">⭐ 偏好</button>
  <button onclick="toggleSettings()">⚙ 设置</button><b id=title>选择会话</b></div>
- <div id=settings class=hide>
+ <div id=unify class=hide>
   <div style="display:flex;justify-content:space-between;align-items:center">
-   <b>⚙ 设置</b><button class=go onclick="toggleSettings()">✕ 关闭设置</button></div>
-  <h2>🪞 自我身份</h2><div id=self_reg></div>
+   <b>🔄 归一工作台</b><button class=go onclick="toggleUnify()">✕ 关闭</button></div>
+  <h2>🪞 我的身份（SELF · 这些号发的都认作「我」）</h2><div id=self_reg></div>
   <div class=sec style="margin-top:6px">🔎 疑似你自己的号（点「这是我」才纳入；不理会也行）</div><div id=self_sug></div>
+  <h2>🧩 人归并候选</h2><div id=unify_cands></div>
   <h2>🧬 我是谁（用于 LLM·随时可改）</h2>
   <div class=row><textarea id=selfprofile rows=5 style="width:100%;border:1px solid #ccc;border-radius:6px;padding:6px" placeholder="班迪这个自然人：性格 / 灵魂 / 喜好 / 工作中的特征 / 核心词……（喂给 AI 起草/诊断，体现你的人味）"></textarea></div>
   <div class=row><button class=go onclick="saveProfile()">💾 保存「我是谁」</button></div>
-  <h2>🔌 接入后端（可填 FQDN 域名）</h2>
-  <div class=row><span class=tag>fullwechat</span>
-   <input id=be_fullwechat style="flex:1;min-width:200px" placeholder="http://wx.example.com:6174">
-   <button class=go onclick="saveBackend('fullwechat')">💾 保存</button></div>
-  <div class=row><span class=tag>powerdata</span>
-   <input id=be_powerdata style="flex:1;min-width:200px" placeholder="http://host:8765/mcp">
-   <button class=go onclick="saveBackend('powerdata')">💾 保存</button></div>
+  <h2>🔄 归并操作</h2>
+  <div class=row><button class=go onclick="runReunify(false)">🔄 启动归一</button>
+   <button class=danger onclick="runReunify(true)">♻️ 复位归一</button><span id=reuniout></span></div>
+  <h2>👥 人管理</h2><div id=people></div>
+ </div>
+ <div id=prefs class=hide>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+   <b>⭐ 用户偏好</b><button class=go onclick="togglePrefs()">✕ 关闭</button></div>
   <h2>🎨 主题</h2>
   <div class=row>
    <label><input type=radio name=theme value=system onchange="setTheme('system')"> 跟随系统</label>
@@ -680,10 +690,20 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
    倒数 <input id=autosend_secs type=number min=1 style=width:56px> 秒
    <button class=go onclick="saveAuto()">💾 保存</button>
    <span class=tag>关掉=必须点「确认发」才发</span></div>
-  <h2>🔄 归一</h2>
-  <div class=row><button class=go onclick="runReunify(false)">🔄 启动归一</button>
-   <button class=danger onclick="runReunify(true)">♻️ 复位归一</button><span id=reuniout></span></div>
-  <h2>👥 人管理</h2><div id=people></div>
+ </div>
+ <div id=settings class=hide>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+   <b>⚙ 设置（运维）</b><button class=go onclick="toggleSettings()">✕ 关闭设置</button></div>
+  <div class=tag style="margin:4px 0;display:block">用户一般不碰；现场 Build / 运维 Agent 才需要。</div>
+  <div class=acc><div class=ah onclick="accTog(this)">▸ 🔌 接入后端（可填 FQDN 域名）</div>
+   <div class=ab>
+    <div class=row><span class=tag>fullwechat</span>
+     <input id=be_fullwechat style="flex:1;min-width:200px" placeholder="http://wx.example.com:6174">
+     <button class=go onclick="saveBackend('fullwechat')">💾 保存</button></div>
+    <div class=row><span class=tag>powerdata</span>
+     <input id=be_powerdata style="flex:1;min-width:200px" placeholder="http://host:8765/mcp">
+     <button class=go onclick="saveBackend('powerdata')">💾 保存</button></div>
+   </div></div>
  </div>
  <div id=msgs></div>
  <div id=countbar class=hide></div>
@@ -910,8 +930,12 @@ async function loadCands(){const cs=await E('/merge-candidates');document.getEle
 const PERSONAS=['工作','生活','学习'];
 function personaSel(kind,id,cur){const o=PERSONAS.map(p=>`<option${p===cur?' selected':''}>${p}</option>`).join('');
  return `<select onchange="setPersona('${esc(kind)}','${esc(id)}',this.value)">${o}</select>`}
-function toggleSettings(){const s=document.getElementById('settings');
- if(s.classList.contains('hide')){s.classList.remove('hide');loadSettings()}else{s.classList.add('hide')}}
+function _hidePanels(){['unify','prefs','settings'].forEach(id=>{const e=document.getElementById(id);if(e)e.classList.add('hide');});}
+function toggleSettings(){const s=document.getElementById('settings');const was=s.classList.contains('hide');_hidePanels();if(was){s.classList.remove('hide');loadSettings();}}
+function toggleUnify(){const u=document.getElementById('unify');const was=u.classList.contains('hide');_hidePanels();if(was){u.classList.remove('hide');loadUnify();}}
+function togglePrefs(){const p=document.getElementById('prefs');const was=p.classList.contains('hide');_hidePanels();if(was){p.classList.remove('hide');loadSettings();}}
+function accTog(el){el.parentElement.classList.toggle('open');const open=el.parentElement.classList.contains('open');el.textContent=el.textContent.replace(/^[▸▾]/, open?'▾':'▸');}
+async function loadUnify(){await loadCands();await loadSettings();const u=document.getElementById('unify_cands'),c=document.getElementById('cands');if(u&&c)u.innerHTML=c.innerHTML;}
 async function loadSettings(){
  {const cfg=autoCfg();document.getElementById('autosend_on').checked=cfg.on;document.getElementById('autosend_secs').value=cfg.secs;}
  {const t=localStorage.getItem('amr_theme')||'system';const el=document.querySelector('input[name=theme][value="'+t+'"]');if(el)el.checked=true;}
@@ -975,4 +999,4 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
 document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
 loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();
-</script></body></html>"""
+</script><div class=fab onclick="createMatter()">＋ 记一件事</div></body></html>"""
