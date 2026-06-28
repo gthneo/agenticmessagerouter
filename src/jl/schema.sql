@@ -251,3 +251,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+-- AI 时代 UI 自优化回路: PII-FREE 交互埋点. 只记「人怎么用 UI」(点了哪个有名控件 /
+-- 换皮肤 / 开关面板 / rage-click / 死胡同), 绝不记联系人名 / wxid / chat_id / 消息内容 /
+-- 输入值 / 任意 innerText. 白名单设计: 只有带 data-ui="<名>" 的控件可被追踪; action 闭集;
+-- ui 是短稳定名 (非文本). 喂给 AI 做数据驱动的「人在哪卡」自明性审计。
+CREATE TABLE IF NOT EXISTS ui_trace (
+    id          INTEGER PRIMARY KEY,
+    session     TEXT NOT NULL DEFAULT '',       -- 每页随机 id (客户端生成; 非用户身份)
+    action      TEXT NOT NULL,                  -- click|click-unnamed|skin|rage|deadend|nav (闭集)
+    ui          TEXT NOT NULL DEFAULT '',       -- 控件稳定名 / 皮肤名 / tagName (短, ≤40, 非 PII)
+    n           INTEGER NOT NULL DEFAULT 0,      -- rage-click 次数等计数
+    ts          INTEGER NOT NULL DEFAULT 0,      -- 客户端事件时刻 (ms epoch)
+    recorded_at INTEGER NOT NULL                 -- 服务端落库时刻 (s epoch)
+);
+CREATE INDEX IF NOT EXISTS idx_ui_trace_action ON ui_trace(action, ui);
+CREATE INDEX IF NOT EXISTS idx_ui_trace_recorded ON ui_trace(recorded_at DESC);
