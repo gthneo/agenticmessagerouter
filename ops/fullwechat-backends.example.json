@@ -1,0 +1,27 @@
+{
+  "_comment": "Template ONLY — synthetic placeholders. Copy to ~/.config/jl/fullwechat-backends.json on the AMR host and fill in REAL host/wxid/token paths there (that real copy is NEVER committed; this repo is public). `jl account onboard` reads the real copy by default; each enabled entry is identity-preflighted (GET /api/status/auth: base wxid must equal self_id) before any binding — the second gate against the wrong-account-binding bug.",
+  "backends": [
+    {
+      "label": "示例后端 A",
+      "amr_account_slot": 4,
+      "tool": "fullwechat",
+      "host": "http://HOST:6174",
+      "token_file": "~/.config/example-a-wechat/token",
+      "self_id": "wxid_test_aaaa",
+      "instance_name": "Desktop-EXAMPLE-A",
+      "customer": "示例客户甲",
+      "enabled": false
+    },
+    {
+      "label": "示例后端 B",
+      "amr_account_slot": 5,
+      "tool": "fullwechat",
+      "host": "http://HOST:6174",
+      "token_file": "~/.config/example-b-wechat/token",
+      "self_id": "wxid_test_bbbb",
+      "instance_name": "Desktop-EXAMPLE-B",
+      "customer": "示例客户乙",
+      "enabled": false
+    }
+  ]
+}

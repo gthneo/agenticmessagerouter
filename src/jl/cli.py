@@ -3,6 +3,8 @@
   jl              full sweep + weighted coloring
   jl <名>         single-person deep dive
   jl 救补          missing wxid/phone queue
+  jl account onboard [--registry <path>] [--commit]  配置驱动接入 fullwechat 后端
+                  (读注册表 → 逐条身份预检 → dry-run → --commit 接入；防绑错号)
   jl person refresh-name [<名>]  display name → 最新会话名 (dry-run → --commit)
   jl --migrate    persons.json -> SQLite (idempotent)
   jl --dump-yaml  human-readable view of the SQLite truth
@@ -114,6 +116,9 @@ def _route_account(rest):
     sub = rest[0] if rest and not rest[0].startswith("--") else "ls"
     params = {"sub": sub, "commit": ("--commit" in rest or "--yes" in rest)}
     tail = rest[1:]
+    if sub == "onboard":
+        params["registry"] = _opt_value(rest, "--registry")
+        return ("account", params)
     if sub == "set":
         aid = tail[0] if tail and not tail[0].startswith("--") else None
         params["account_id"] = int(aid) if aid is not None else None
@@ -515,8 +520,10 @@ def cmd_account(conn, params):
     sub = params.get("sub", "ls")
     if sub == "ls":
         return _account_ls(conn)
+    if sub == "onboard":
+        return cmd_account_onboard(conn, params)
     if sub not in ("add", "set"):
-        print(f"❌ 未知子命令: account {sub} (支持: ls / add / set)")
+        print(f"❌ 未知子命令: account {sub} (支持: ls / add / set / onboard)")
         return
     if sub == "add" and not params["flags"].get("token_file"):
         print("用法: jl account add --platform wechat --tool fullwechat \\\n"
@@ -576,6 +583,79 @@ def _print_account_plan(plan):
         print(f"  token-file   {plan['token_file']}  →  {plan['cred_dest']}  (chmod 600)")
     else:
         print("  token-file   (未提供 — cred_ref 保持不变)")
+
+
+def cmd_account_onboard(conn, params, *, fetch=None):
+    """Config-driven onboarding: read the backend registry and onboard each enabled
+    entry through the identity-preflight → dry-run → (--commit) apply gate.
+
+    For EACH enabled backend:
+      1. identity preflight (GET /api/status/auth) — base wxid MUST equal self_id,
+         else SKIP + loud warning (防绑错号; mismatch/unreachable never aborts the run).
+      2. capability probe (GET /api/capabilities) — one-line summary, optional.
+      3. dry-run plan — same before→after table as `jl account set`.
+      4. --commit → apply, read back the slot, log an account_onboard event.
+
+    Default (no --commit) writes NOTHING. ``fetch`` is the HTTP seam (tests inject)."""
+    from . import onboard
+    reg_path = params.get("registry") or onboard.DEFAULT_REGISTRY
+    fetch = fetch or onboard._get_json
+    try:
+        backends = onboard.load_registry(reg_path)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ 读注册表失败: {e}\n   模板见 ops/fullwechat-backends.example.json，"
+              f"真实副本放 {onboard.DEFAULT_REGISTRY}（不入仓）。")
+        return
+    commit = bool(params.get("commit"))
+    enabled = [b for b in backends if b.get("enabled")]
+    print(f"\n🧩 配置驱动接入 — 注册表 {reg_path}")
+    print(f"   {len(backends)} 条后端，其中 {len(enabled)} 条 enabled"
+          + ("（--commit 真接）" if commit else "（dry-run，不写库）"))
+    done = skipped = 0
+    for entry in backends:
+        label = entry.get("label", "?")
+        slot = entry.get("amr_account_slot", "?")
+        if not entry.get("enabled"):
+            print(f"\n— {label} (slot {slot}) — 已停用 disabled，跳过。")
+            continue
+        print(f"\n━━ {label} (slot {slot}) @ {entry.get('host', '?')} ━━")
+        res = onboard.onboard_entry(conn, entry, fetch=fetch)
+        pre = res["preflight"]
+        if not pre["ok"]:
+            skipped += 1
+            if pre["reason"] == "mismatch":
+                print(f"⚠️ 身份不符: backend 报 {pre['logged_in']} (base {pre['base']}) "
+                      f"≠ 配置 self_id {pre['self_id']} — 跳过, 防绑错号")
+            elif pre["reason"] == "no_token":
+                print(f"⚠️ 跳过: token_file 缺失或为空 ({entry.get('token_file')}) — 无法预检身份")
+            elif pre["reason"] == "unreachable":
+                print(f"⚠️ 跳过: 后端不可达 ({pre.get('error', 'unreachable')}) — 不接, 一个坏后端不影响其余")
+            elif pre["reason"] == "no_user":
+                print("⚠️ 跳过: /api/status/auth 未返回 loggedInUser — 响应异常, 不接")
+            else:
+                print(f"⚠️ 跳过: 预检失败 ({pre['reason']})")
+            continue
+        print(f"✅ 身份预检通过: loggedInUser={pre['logged_in']} (base {pre['base']}) == self_id {pre['self_id']}")
+        caps = res["capabilities"]
+        print(f"   能力: {caps['summary'] if caps['summary'] else '(/api/capabilities 不可用，按降级处理)'}")
+        plan = res["plan"]
+        _print_account_plan(plan)
+        if not commit:
+            print("   （dry-run：未写库。加 --commit 真正接入。）")
+            done += 1
+            continue
+        onboard.apply_plan(conn, plan)
+        row = {a["account_id"]: a for a in db.get_accounts(conn)}.get(plan["account_id"], {})
+        db.log_event(conn, kind="account_onboard", actor=_actor(),
+                     detail={"account_slot": plan["account_id"], "host": entry.get("host"),
+                             "loggedInUser": pre["logged_in"], "confirmer": _actor()})
+        print(f"   ✅ 已接入 → 回读 slot {plan['account_id']}: "
+              f"tool={row.get('tool')} host={row.get('host')} self_id={row.get('self_id')}")
+        done += 1
+    verb = "已接入" if commit else "通过预检(dry-run)"
+    print(f"\n汇总: {verb} {done} 条 | 跳过 {skipped} 条 | enabled {len(enabled)} 条")
+    if not commit and done:
+        print("确认上面计划无误后，加 --commit 真正写入。")
 
 
 # ----- person actions -------------------------------------------------------
