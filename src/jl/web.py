@@ -578,6 +578,12 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
 #axisbar{display:flex;gap:4px;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--panel)}
 #axisbar .axt{font-size:13px;padding:5px 16px;border-radius:8px;cursor:pointer;color:var(--fg2)}
 #axisbar .axt.on{background:var(--bg);font-weight:700;color:var(--fg)}
+#axis-matters .board{display:flex;gap:12px;padding:14px;overflow-x:auto;align-items:flex-start}
+#axis-matters .col{flex:0 0 240px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:8px}
+#axis-matters .col h4{font-size:12px;color:var(--fg2);margin:2px 4px 8px}
+#axis-matters .mc{background:var(--bg);border:1px solid var(--border);border-left:3px solid var(--accbd);border-radius:8px;padding:8px 10px;margin-bottom:8px;cursor:pointer}
+#axis-matters .mc .t1{font-size:13px;font-weight:600}
+#axis-matters .mc .t2{font-size:11px;color:var(--fg2);margin-top:3px}
 </style><script>(function(){var t=localStorage.getItem('amr_theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;})();</script></head><body>
 <div id=skinbar style="position:fixed;right:10px;bottom:10px;z-index:50;font-size:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px 8px">
  皮肤
@@ -670,7 +676,19 @@ function switchAxis(a){localStorage.setItem('amr_axis',a);
  document.querySelectorAll('#axisbar .axt').forEach(t=>t.classList.toggle('on',t.dataset.axis===a));
  document.getElementById('axis-people').style.display=a==='people'?'block':'none';
  document.getElementById('axis-matters').style.display=a==='matters'?'block':'none';
- /* Task 2/3 渲染挂这里 */}
+ if(a==='matters')loadMatterBoard();
+ if(a==='people')loadDualPeople();}
+function loadDualPeople(){/* Task 3 */}
+const STAGE_ORDER=['候选','进行','等待','阻塞','完结'];
+async function loadMatterBoard(){
+ let ms; try{ms=await E('/matters');}catch(e){ms=[];}
+ const groups={};(ms||[]).forEach(m=>{(groups[m.status||'其它']=groups[m.status||'其它']||[]).push(m);});
+ const order=[...STAGE_ORDER.filter(s=>groups[s]),...Object.keys(groups).filter(s=>!STAGE_ORDER.includes(s))];
+ const cols=order.map(s=>'<div class=col><h4>'+esc(s)+'（'+groups[s].length+'）</h4>'+
+  groups[s].map(m=>'<div class=mc onclick="openMatter('+m.id+')"><div class=t1>'+esc(m.title||'(未命名)')+'</div>'+
+   '<div class=t2>'+esc(m.kind||'')+'</div></div>').join('')+'</div>').join('');
+ document.getElementById('axis-matters').innerHTML='<div class=board>'+(cols||'(暂无事)')+'</div>';}
+function openMatter(id){toast('事 #'+id+' 详情/会话钻取 — 后续接 lifecycle');}
 async function loadDigest(){
  let d; try{d=await E('/digest');}catch(e){d={reports:{},gate:[]};}
  document.getElementById('skin-digest').innerHTML=renderDigest(d);}
