@@ -1,0 +1,71 @@
+# CI 闸 — 机器，不可绕。on PR -> main.
+#
+# 单账号生态没有"另一个人来审你"的天然分权，治理只能靠**机器(CI) + agent 级分权**。
+# 这条 workflow 是机器闸：任何改契约的 PR 必须过它，红就 merge 不了（main 已 branch-protected,
+# require PR + 这个 status check）。治理铁律见 GOVERNANCE.md。
+#
+# 三步：(a) lint —— markdown 基本健全性 / 关键文件在不在；
+#       (b) conformance —— 跑 scripts/conformance.py 校验 fixtures 符合 canonical 契约；
+#       (c) compat-gate —— 占位的兼容闸（major 变更须新文件 + bump），先留 step 后续接。
+#
+# 分权要求 require status check 的 job 名 = `conformance`（给 branch protection 用）。
+
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: conformance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # (a) lint —— 不引第三方，纯 stdlib 的基本健全性检查：
+      #     关键治理/契约文件必须在；markdown 文件无明显坏形（非空、UTF-8 可读）。
+      - name: lint (structure + markdown sanity)
+        run: |
+          set -eu
+          fail=0
+          for f in 00-CONSTITUTION.md README.md GOVERNANCE.md VERSIONING.md CODEOWNERS \
+                   message/canonical.md fixtures/conformance.md; do
+            if [ ! -f "$f" ]; then
+              echo "::error::lint: 缺关键文件 $f"; fail=1
+            fi
+          done
+          # 每个 tracked 的 .md 必须非空且能按 UTF-8 读出（防坏编码/空壳）。
+          while IFS= read -r md; do
+            if [ ! -s "$md" ]; then echo "::error::lint: 空 markdown $md"; fail=1; fi
+            python3 - "$md" <<'PY' || { echo "::error::lint: $md 非法 UTF-8"; fail=1; }
+          import sys
+          open(sys.argv[1], encoding="utf-8").read()
+          PY
+          done < <(git ls-files '*.md')
+          [ "$fail" = 0 ] && echo "lint: ok"
+          exit "$fail"
+
+      # (b) conformance —— 机器闸核心：fixtures 必须符合 canonical 契约（必填/枚举/direction/
+      #     msg_id 非空 + fixtures 自洽 msg_id 全局唯一）。红 = 实现/契约漂移。
+      - name: conformance (fixtures vs message.canonical)
+        run: python3 scripts/conformance.py
+
+      # (c) compat-gate —— 占位的兼容闸。
+      #     目标(后续接)：按 VERSIONING.md 校验破坏性变更必须**另开新文件 + bump schema major**，
+      #     minor 必须向后兼容。现在先留住这道 step（永远存在的闸位），逻辑随 VERSIONING 工具化补上。
+      #     TODO: diff message/*.md 的 schema 主版本号；若 major 变了而无新文件 → 红。
+      - name: compat-gate (placeholder — major 须新文件 + bump)
+        run: |
+          echo "compat-gate: placeholder step — 兼容闸位已占住，逻辑待接（见 VERSIONING.md）。"
+          echo "compat-gate: 当前不阻断；后续按 VERSIONING.md 把 major-须新文件+bump 自动化。"

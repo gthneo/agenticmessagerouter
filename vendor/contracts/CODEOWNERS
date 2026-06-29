@@ -4,8 +4,10 @@
 # 王总钦定：AMR（@gthneo）统一拥有所有业务契约（含 moments-publish），不按"谁起草谁持有"分散。
 # 唯一例外：ops-agent/ 由 fullwechat 持有（约束"怎么运维 fullwechat 后端自己"）。
 #
-# 注：@gthneo 是 AMR 的 GitHub handle 占位；fullwechat 团队的 handle 待补
-# （下面以注释标出 "fullwechat 持有"，建仓接 GitHub 后替换为其真实 handle/team）。
+# 注：当前所有仓与开发都在同一 GitHub 账号 @gthneo 下（PDWX/fullwechat 仓也在 @gthneo 下），
+# 故 owner handle 统一是 @gthneo（非占位，是真实 handle）。AMR 与 fullwechat 的「持有」区分
+# 目前是**约定**（本文件注释 + 各 spec header），不是两个 GitHub 身份。
+# 将来多人/多账号时，把对应行换成各自 handle 或上 GitHub org/team 即可。
 
 # 默认：仓内未单独指派的一切（含 README / VERSIONING / CODEOWNERS 自身）归 AMR
 *                       @gthneo
@@ -18,7 +20,6 @@
 /control-and-voice/     @gthneo
 /VERSIONING.md          @gthneo
 
-# 运维契约 —— fullwechat 持有（非 AMR）。
-# fullwechat 持有：约束 fullwechat 后端自身的可观测/运维面，变更由 fullwechat 批。
-# TODO：接 GitHub 后把下面的 @gthneo 占位替换为 fullwechat 团队的真实 handle/team。
+# 运维契约 —— fullwechat 持有（约定，非 AMR）：约束 fullwechat 后端自身的可观测/运维面，
+# 变更由 fullwechat 批。handle 现为 @gthneo（单账号）；将来 fullwechat 用独立账号/team 时换此行。
 /ops-agent/             @gthneo  # fullwechat 持有

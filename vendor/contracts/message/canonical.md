@@ -2,7 +2,9 @@
 
 > 真相源: `agentic-contracts` 仓 · owner 见 CODEOWNERS（`message/` → AMR/@gthneo）。
 
-> **日期** 2026-06-26（含 v1.1 `msg_id` 加严口径，见 §2.1）｜ **状态** 提案（待各通道后端评估实现）
+> **日期** 2026-06-26（含 v1.1 `msg_id` 加严口径，见 §2.1；**v1.2 读空必可区分 / 读覆盖声明 / `ts` 读路径不丢 / 公众号契约化，见 §6.4 + C6**）｜ **状态** 提案（待各通道后端评估实现）
+> **v1.2 兼容性**：对**消费成功读**纯加法（`success=数组` 不变、`ts` 本就必填）→ schema 仍 `message.canonical/1`（**minor**）。新增 = 读不可用的 409 信号 + capabilities `read` 块 + C6 口径；消费方应处理新的 409/工具错误。
+> ⚠️ **生产侧收紧**：`[]` 的语义被**重定义**——从前「读不到 or 真 0」二义，现在 `[]` 带保证「真 0 + 覆盖完整」。今天任何在密钥缺失时回 `[]` 的后端**即变为不合规**，须改吐 409。判作 minor 仅因本契约仍是**提案**、尚无已部署的合规后端；一旦有后端实现，此为破坏性收紧，须在该后端版本里显式声明。
 > **适用范围** **一切消息通道（Message Channels）**：微信 / 电话 / 飞书 / iMessage / 企微 / 未来任意。每个通道后端都遵守本契约。
 > **定义方** AgenticMessageRouter (AMR / the Router) —— 契约唯一真相源在 `agentic-contracts` 仓（本文件），AMR(@gthneo) own。
 > **实现方** 各通道后端，**各自独立仓库**（如 `gthneo/powerdata`、fullwechat 后端仓 …），引用本契约实现；每通道一份**映射附录**（微信见附录 A）。
@@ -46,9 +48,8 @@
   "is_mentioned": false,
   "quote": {
     "author": "张三",
-    "text": "季度报表初稿",
     "refKind": "file",
-    "refText": "Q2-report.pdf"
+    "refText": "季度报表初稿"
   }
 }
 ```
@@ -163,7 +164,7 @@
 | 49.19 / 49.24 | 合并转发 / 收藏笔记 | `chat_history` | `chat_history{title, items?}`（递归解 recordinfo；解不动只给 title） |
 | 49.33 / 49.36 | 小程序 | `miniprogram` | `miniprogram{title, source, url}` ⚠ **33/36 都要认** |
 | 49.51 / 49.63 | 视频号 / 视频号直播 | `link` | `link{title:nickname/desc, source:"视频号"}`（无独立 kind，归 link） |
-| 49.57 | QUOTE 引用回复 | `quote` | `quote{author:displayname, text:被引content, refKind:map(refermsg.type), refText}`；顶层 `text`=回复正文。**递归按 refermsg.type 解被引** |
+| 49.57 | QUOTE 引用回复 | `quote` | `quote{author:displayname, refKind:map(refermsg.type), refText:被引content display}`；顶层 `text`=回复正文（**quote 子对象内不放 `text`**，对齐 §2.1）。**递归按 refermsg.type 解被引** |
 | 49.62 | PAT 拍一拍（appmsg 形态） | `system` | `system{event:pat, actor, text}` |
 | 49.87 | CHATROOM_NOTICE 群公告 | `system` | `system{event:notice, text}`（复用 recordinfo） |
 | 49.2000 | TRANSFER 转账 | `transfer` | `payment{amount:feedesc, memo:pay_memo, stage:paysubtype}` |
@@ -204,11 +205,21 @@
 { "schema": "message.canonical/1",
   "channel": "wechat",
   "kinds": ["text","image","voice","video","file","link","quote","system"],
-  "direction": true }
+  "direction": true,
+  "read": {
+    "coverage": { "coveredShards": 28, "totalShards": 30 },
+    "unreadableChats": ["wxid_test_roy"],
+    "gh_messages": "out-of-scope"
+  } }
 ```
 
 - `kinds` = 该后端实现了的 canonical kind 子集。**未列出的 kind**，后端遇到对应消息时降级为 `text`（+ 占位）或 `unknown`，**不报错**。
 - `direction:true/false` = 该后端能否标出/入站。false → AMR 默认 `in`，并由下游 `db.apply_self_directions` / self_id 后处理补判（对齐现有 powerdata 注释）。
+- `read`（**读覆盖声明**，§6.4 配套）= 后端的读可用性，让消费方预判、运维可见：
+  - `read.coverage.{coveredShards, totalShards}` = 后端级分片覆盖（已解密分片 / 总分片）。`coveredShards < totalShards` → 存在读不到的会话。
+  - `read.unreadableChats[]`（可选）= 已知当前读不到的会话 id 列表（消费方据此不把它们的空当 0 互动）。
+  - `read.gh_messages` ∈ `"supported"` \| `"out-of-scope"`（R4）= 公众号 `gh_*` 图文是否可读；`out-of-scope` 即诚实声明「不读」，**好过静默空**。
+  > ⚠️ **字段名待与 fullwechat/PDWX 仁德对齐一次**（请求方明确要求）：`coveredShards`/`totalShards`/`unreadableChats`/`gh_messages` 为 AMR 提案，PR review 时与实现方敲定后落定（口径不变，只对名字）。
 
 ### 6.3 优雅降级矩阵
 
@@ -219,6 +230,50 @@
 | 后端给了 AMR 不认识的 kind（未来 schema 漂移） | AMR 按 `unknown` 处理，渲染 `text`。前向兼容。 |
 
 > **向后兼容验证点**：一个只会 `{"kind":"text","text":"...","direction":"in",...}` 的后端，喂给 AMR 必须照常入库、FTS、渲染——这是契约的底线，等价于今天 PowerData 的行为。
+
+### 6.4 读调用返回契约 —— 读空必可区分（R1 / R3 / R4）
+
+§2 定义**单条信封**；本节定义**读调用本身**（`read_messages` / `GET /api/messages`）的返回口径。
+病根：后端在**分片密钥缺失 / 消息表不可映**时 `return []`，与「真读到 0 条」无法区分 → 下游把
+「读不到」误读成「0 互动」→ 对沉默的人**漏报**（家人雷达：最该报警时反而哑了）。这违背 0 号宪法
+第 2 条「结果回交给人看」与运维 loud-fail。本节是**写侧** loud-fail 原则（`text` 永不空 / `direction`
+不得一律 `in` / 认不准 `unknown`）的**读侧镜像**。同根于本季「哑失败」治理（`msg_id` 撞键 = C1）。
+
+**R1 · 读空必可区分（核心）**
+- **读成功（覆盖已确认，0 或多条）→ 数组**，与今天一致（**向后兼容地板**）。**空数组从此带保证：
+  「真读到了 0 条、该会话覆盖完整」**——后端只有能确认覆盖时才允许回空数组。
+- **读不可用（分片密钥缺失 / 消息表缺失或未映 / 任何"无法确认覆盖"）→ 不得回空数组**，给可区分信号：
+  - **REST**（`GET /api/messages`）：HTTP **409** + 结构化体
+    ```json
+    { "error": {
+        "code": "read_unavailable",
+        "reason": "key_unavailable",
+        "channel": "wechat",
+        "chatId": "wxid_test_roy",
+        "coverage": { "coveredShards": 28, "totalShards": 30 }
+    } }
+    ```
+  - **MCP**（`read_messages`）：返回**工具错误**（`isError: true`，体同上），**绝不回 `[]`**。
+- `reason` 是**封闭**小枚举（`unknown` 即兜底，新增值走本仓 PR + minor；与 `conformance.py`
+  `READ_REASONS` 一致）：`key_unavailable`（分片密钥没提）/ `table_unavailable`（密钥已解但该 talker
+  消息表缺失/未映——如 2026-06-29 **Roy 孤例**：会话有 `lastMsgLocalId` 却 per-chat 读空）/ `unknown`
+  （说不清、但**确实无法确认覆盖**）。**原则压倒细节：后端凡不能确认该会话覆盖完整，就必须给信号、
+  不许回裸空数组。**
+- 注：`coverage` 出现在两处——§6.2 capabilities 的 `read.coverage` 是**后端级**能力快照，
+  本节 `error.coverage` 是**单次信号**里的现场快照；同名、不同粒度，皆可选。
+- 为什么选 **409**（而非 `200`+对象）：非 2xx **逼**消费方分支处理（多数 HTTP client 对非 2xx 抛错），
+  这才是 loud-fail；`200`+非数组体会被老消费方静默误迭代 → 又制造一种哑失败，且破坏「success=数组」。
+  409 = 已知、reseed 后可重试的命名状态。
+
+**R3 · `ts` 不可在读路径丢**
+§2.1 已规定 `ts` 必填；**读调用返回的每条信封必须携带 `ts`**，禁止 MCP / 序列化层省略
+（2026-06-29 实战：底层 `/api/messages` 行有 `ts`，但 MCP `server.mjs` 默认未透出 → 仁德本地补丁）。
+见 conformance C6。
+
+**R4 · 公众号（`gh_*`）行为契约化**
+公众号图文推送不在普通消息表。后端**二选一，禁静默空**：
+- **支持读** → 吐 canonical 信封（`kind:"link"`，`link{title,summary,url}` + `ts`）；或
+- **不支持** → 在 §6.2 capabilities 声明 `read.gh_messages:"out-of-scope"`，消费方据此预判、不误读为 0。
 
 ## 7. AMR 侧职责（与后端分离）
 

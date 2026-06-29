@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "read_unavailable",
+    "reason": "key_unavailable",
+    "channel": "wechat",
+    "chatId": "wxid_test_roy",
+    "coverage": { "coveredShards": 28, "totalShards": 30 }
+  }
+}
