@@ -673,9 +673,9 @@ def make_handler(db_path):
         def do_GET(self):
             u = urlparse(self.path)
             params = {k: v[0] for k, v in parse_qs(u.query).items()}
-            if u.path in ("/", "/index.html", "/AMR.html"):
-                # 稳定主入口: 既是 `/` 也是 `/AMR.html` —— 用户可直接收藏域名/IP 后挂 AMR.html,
-                # token 不再必须挂 URL(页面 localStorage 记住,见客户端 token 解析+登录闸)。
+            if u.path in ("/", "/index.html") or u.path.lower() == "/amr.html":
+                # 稳定主入口: `/` 与 `/amr.html`(大小写不敏感 —— 用户常打小写) —— 可直接
+                # 收藏域名/IP 后挂 amr.html; token 不必挂 URL(localStorage 记住, 见登录闸)。
                 return self._send(200, _index_html().encode(), "text/html; charset=utf-8")
             if u.path == "/api/version":
                 # identity endpoint — no token (mirror of the backend's public
