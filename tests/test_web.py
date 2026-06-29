@@ -231,6 +231,48 @@ def test_api_confirm_outbox_sends_and_marks(monkeypatch):
     assert "send" in [e["kind"] for e in db.get_events(c)]
 
 
+def _out_msgs(c, cid):
+    return [dict(r) for r in c.execute(
+        "SELECT * FROM messages WHERE conversation_id=? AND direction='out' ORDER BY id",
+        (cid,)).fetchall()]
+
+
+def test_api_confirm_outbox_persists_sent_message(monkeypatch):
+    """A successful send writes an out-message into `messages` so the human sees it on
+    re-open/refresh (0号宪法: 结果回交给人看)."""
+    c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
+    _stub_wechat_sender(monkeypatch, (True, ""))
+    oid = web.api_queue_outbox(c, {"conversation_id": cid, "body": "去火星需要做一些什么准备？"})["id"]
+    res = web.api_confirm_outbox(c, {"id": oid})
+    assert res["ok"] is True
+    outs = _out_msgs(c, cid)
+    assert len(outs) == 1
+    assert outs[0]["content"] == "去火星需要做一些什么准备？"
+    assert outs[0]["direction"] == "out"
+    assert outs[0]["type"] == "text"
+    # No false contract-violation collision (content-hash key is unique per content+ts).
+    assert "contract_violation" not in [e["kind"] for e in db.get_events(c)]
+
+
+def test_api_confirm_outbox_no_persist_on_failure(monkeypatch):
+    c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
+    _stub_wechat_sender(monkeypatch, (False, "offline"))
+    oid = web.api_queue_outbox(c, {"conversation_id": cid, "body": "hi"})["id"]
+    web.api_confirm_outbox(c, {"id": oid})
+    assert _out_msgs(c, cid) == []   # failed send leaves no message
+
+
+def test_api_confirm_outbox_content_dedup_guard(monkeypatch):
+    """Two confirmed sends of identical content within the dedup window collapse to ONE
+    persisted out-message (absorbs a possible poll re-ingest of our own send)."""
+    c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
+    _stub_wechat_sender(monkeypatch, (True, ""))
+    for _ in range(2):
+        oid = web.api_queue_outbox(c, {"conversation_id": cid, "body": "同一句话"})["id"]
+        web.api_confirm_outbox(c, {"id": oid})
+    assert len(_out_msgs(c, cid)) == 1
+
+
 def test_api_confirm_outbox_send_failure_marks_failed(monkeypatch):
     c = db.connect(":memory:"); db.init_db(c); cid = _ob_conv(c)
     _stub_wechat_sender(monkeypatch, (False, "offline"))
