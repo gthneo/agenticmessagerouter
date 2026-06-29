@@ -653,7 +653,9 @@ def make_handler(db_path):
         def do_GET(self):
             u = urlparse(self.path)
             params = {k: v[0] for k, v in parse_qs(u.query).items()}
-            if u.path in ("/", "/index.html"):
+            if u.path in ("/", "/index.html", "/AMR.html"):
+                # 稳定主入口: 既是 `/` 也是 `/AMR.html` —— 用户可直接收藏域名/IP 后挂 AMR.html,
+                # token 不再必须挂 URL(页面 localStorage 记住,见客户端 token 解析+登录闸)。
                 return self._send(200, _index_html().encode(), "text/html; charset=utf-8")
             if u.path == "/api/version":
                 # identity endpoint — no token (mirror of the backend's public
@@ -1160,7 +1162,11 @@ function renderDigest(d){
 function gateGo(it){
  if(it.kind==='send_draft'){P('/outbox/confirm',{id:it.outbox_id}).then(r=>{toast(r.ok?'已发送 ✅':'失败:'+(r.error||''));loadDigest();});}
  else{toast('已记录(撩动作走主动队列)');}}
-const TOK=new URLSearchParams(location.search).get('token')||'';
+// token 解析: URL ?token= 优先(且写进 localStorage 记住) → 否则用上次记住的 → 否则空(走登录闸)。
+// 这样收藏 /AMR.html(不带 token)也能用: 首次带 token 访问一次后, 本机永久记住。
+const _utk=new URLSearchParams(location.search).get('token');
+if(_utk){try{localStorage.setItem('amr_token',_utk);}catch(e){}}
+const TOK=_utk||(function(){try{return localStorage.getItem('amr_token')||'';}catch(e){return '';}})();
 const E=(s,p='')=>{const qs=[p,TOK&&'token='+encodeURIComponent(TOK)].filter(Boolean).join('&');return fetch('/api'+s+(qs?'?'+qs:'')).then(r=>r.json())};
 const P=(s,body)=>{const qs=TOK?'?token='+encodeURIComponent(TOK):'';return fetch('/api'+s+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())};
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
@@ -1448,7 +1454,24 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
 document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
 // 快捷键: 在回复框里 Ctrl+Enter(Win/Linux) / Cmd+Enter(Mac) = 发送(走 armSend 倒计时否决窗, 不直发)
 document.getElementById('reply').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();armSend();}});
-loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();
+// 登录闸: 无 token / token 失效(401) 时, 不再静默空白, 给一个一次性输入框, 存本机后进入。
+function _showTokenGate(){document.body.innerHTML=
+ '<div style="max-width:340px;margin:14vh auto;padding:24px;font-family:system-ui;text-align:center">'+
+ '<h2 style="margin:0 0 4px">AMR 收件箱</h2>'+
+ '<div style="color:#888;font-size:13px;margin-bottom:16px">需要访问令牌(token)才能加载会话</div>'+
+ '<input id=_tk type=password placeholder=" 粘贴 token" style="width:100%;padding:10px;font-size:14px;box-sizing:border-box;margin-bottom:10px">'+
+ '<button id=_tkgo style="width:100%;padding:10px;font-size:14px;cursor:pointer">进入</button>'+
+ '<div style="color:#aaa;font-size:11px;margin-top:10px">token 只存在本机浏览器, 不上传</div></div>';
+ function go(){var v=document.getElementById('_tk').value.trim();if(!v)return;
+  try{localStorage.setItem('amr_token',v);}catch(e){}location.href=location.pathname;}
+ document.getElementById('_tkgo').onclick=go;
+ document.getElementById('_tk').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
+ document.getElementById('_tk').focus();}
+async function boot(){
+ try{var r=await fetch('/api/conversations'+(TOK?'?token='+encodeURIComponent(TOK):''));
+   if(r.status===401){_showTokenGate();return;}}catch(e){}
+ loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();}
+boot();
 // ---- PII-FREE UI 交互埋点 (AI 时代 UI 自优化回路) ----------------------------
 // 白名单设计: 只追踪带 data-ui 的有名控件 + 换皮肤/开关面板/rage-click/死胡同。
 // 绝不记联系人名/wxid/chat_id/消息内容/输入值/任意 innerText (点中的联系人名=PII)。

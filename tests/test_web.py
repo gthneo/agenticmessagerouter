@@ -380,3 +380,12 @@ def test_api_unlink_no_link_returns_gracefully():
     cid = db.upsert_conversation(c, account_id=1, platform="wechat", chat_id="w", name="张三")
     res = web.api_unlink(c, {"conversation_id": cid})
     assert res["ok"] is False and res["freed"] is None
+
+
+def test_index_html_has_token_gate_and_localstorage_entry():
+    """稳定入口: 页面必须自带 token 解析(URL→localStorage)+ 401 登录闸, 这样收藏
+    /AMR.html(不带 token)也能用。这些字符串在则行为在; 缺则回归(用户「看不到入口」)。"""
+    html = web._index_html()
+    assert "amr_token" in html          # localStorage 记住 token 的键
+    assert "_showTokenGate" in html     # 无/失效 token 时的一次性登录闸
+    assert "function boot(" in html     # 走 401 探针再决定加载 or 闸
