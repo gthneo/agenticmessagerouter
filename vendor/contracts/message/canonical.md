@@ -219,7 +219,7 @@
   - `read.coverage.{coveredShards, totalShards}` = 后端级分片覆盖（已解密分片 / 总分片）。`coveredShards < totalShards` → 存在读不到的会话。
   - `read.unreadableChats[]`（可选）= 已知当前读不到的会话 id 列表（消费方据此不把它们的空当 0 互动）。
   - `read.gh_messages` ∈ `"supported"` \| `"out-of-scope"`（R4）= 公众号 `gh_*` 图文是否可读；`out-of-scope` 即诚实声明「不读」，**好过静默空**。
-  > ⚠️ **字段名待与 fullwechat/PDWX 仁德对齐一次**（请求方明确要求）：`coveredShards`/`totalShards`/`unreadableChats`/`gh_messages` 为 AMR 提案，PR review 时与实现方敲定后落定（口径不变，只对名字）。
+  > ✅ **字段名已与 pw仁德（powerdata-wx 实现方）对齐定稿**（2026-06-29）：`coveredShards`/`totalShards`/`unreadableChats`/`gh_messages` = 定稿名，各后端按此实现，不再变更。
 
 ### 6.3 优雅降级矩阵
 
