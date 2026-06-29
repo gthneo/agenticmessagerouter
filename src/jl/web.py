@@ -1038,7 +1038,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  </div>
  <div id=msgs></div>
  <div id=countbar class=hide></div>
- <div id=replybox><textarea id=reply rows=2 placeholder="选右侧话术或自己打字 → 发送后倒数自动发，倒数内可「改改」"></textarea>
+ <div id=replybox><textarea id=reply rows=2 placeholder="选右侧话术或自己打字 → 发送(或 Ctrl/⌘+Enter)后倒数自动发，倒数内可「改改」"></textarea>
  <span id=sendbar><button data-ui=send onclick="armSend()">发送 →</button></span>
  <button data-ui=ai-draft onclick="aiDraft()">✨ AI 拟话术</button></div></div>
 <div id=right>
@@ -1405,6 +1405,8 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
  document.getElementById('msgs').innerHTML='<h3>搜索结果 ('+h.length+')</h3>'+h.map(x=>`<div class=m>
  <span class=s>${esc(x.sender)}</span><span class=t>${fmt(x.ts)}</span><div>${esc(x.content)}</div></div>`).join('')})
 document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
+// 快捷键: 在回复框里 Ctrl+Enter(Win/Linux) / Cmd+Enter(Mac) = 发送(走 armSend 倒计时否决窗, 不直发)
+document.getElementById('reply').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();armSend();}});
 loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();
 // ---- PII-FREE UI 交互埋点 (AI 时代 UI 自优化回路) ----------------------------
 // 白名单设计: 只追踪带 data-ui 的有名控件 + 换皮肤/开关面板/rage-click/死胡同。
