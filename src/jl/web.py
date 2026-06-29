@@ -105,6 +105,7 @@ def api_list_outbox(conn):
 
 
 def api_confirm_outbox(conn, payload):
+    import time
     from . import send
     row = db.get_outbox_row(conn, int(payload["id"]))
     if row is None or row["status"] != "pending":
@@ -114,7 +115,44 @@ def api_confirm_outbox(conn, payload):
     db.log_event(conn, kind="send", actor=payload.get("actor", "user"),
                  detail={"outbox_id": row["id"], "platform": row["platform"],
                          "chat_id": row["chat_id"], "ok": ok, "error": err})
+    if ok:
+        # 0号宪法「结果回交给人看」: persist the sent message into `messages` as a
+        # direction='out' record so it shows on re-open/refresh. The poll does NOT
+        # reliably re-ingest our OWN sends, so without this the human can't see what
+        # AMR sent. msg_key is a content-hash ("h:...") — no serverId exists at send
+        # time — and is unique per (minute-ts, sender, content), so it won't false-fire
+        # the msg_key_collision teeth in db.insert_messages.
+        ts = int(time.time())
+        sender = _self_sender(conn, row["account_id"])
+        body = row["body"]
+        # Content-level dedup ONLY for this sent-message path (NOT the global inbound
+        # dedup): if an out-message with the same (sender, content) already exists at a
+        # ts within ±300s, a poll has already re-ingested this very send — skip the
+        # insert rather than risk a near-duplicate bubble. Identical self-content within
+        # 5min is almost certainly the same message, not two genuine distinct sends.
+        dup = conn.execute(
+            "SELECT 1 FROM messages WHERE conversation_id=? AND direction='out' "
+            "AND sender=? AND content=? AND ABS(ts-?)<=300 LIMIT 1",
+            (row["conversation_id"], sender, body, ts)).fetchone()
+        if dup is None:
+            rec = ingest.MsgRecord(
+                msg_key=ingest.msg_key(source="outbox", stable_id=None,
+                                       ts=ts, sender=sender, content=body),
+                ts=ts, content=body, sender=sender, direction="out",
+                type="text", is_mentioned=False)
+            db.insert_messages(conn, row["conversation_id"], [rec])
     return {"ok": ok, "error": err}
+
+
+def _self_sender(conn, account_id):
+    """A sensible 'sender' label for a self-sent (direction='out') message. The chat
+    renderer shows NO name on out-bubbles, so this is just the stored attribution: the
+    account's label if present, else '我'. (Kept here, not in db, to stay near the one
+    place that writes self-sent messages.)"""
+    for a in db.get_accounts(conn):
+        if a.get("account_id") == account_id:
+            return (a.get("label") or "").strip() or "我"
+    return "我"
 
 
 def api_cancel_outbox(conn, payload):
@@ -1195,14 +1233,16 @@ function armSend(){if(!window.CURCONV){alert('先选会话');return;}
   }else{
     bar('<span class=txt>确认发给 '+esc(who)+'：'+esc(body)+'</span>','确认发');
   }}
+function _appendOutBubble(cid,body){if(window.CURCONV!==cid)return;
+  const ms=document.getElementById('msgs');if(!ms)return;
+  ms.insertAdjacentHTML('beforeend','<div class="m out"><div class=bub>'+esc(body)+'</div><span class=t>刚刚</span></div>');ms.scrollTop=ms.scrollHeight;}
 async function doSend(){if(window.SENDTIMER){clearInterval(window.SENDTIMER);window.SENDTIMER=null;}
   const ta=document.getElementById('reply'),body=ta.value.trim(),c=document.getElementById('countbar');
   if(!body){cancelSend();return;}
   c.querySelectorAll('button').forEach(b=>{b.disabled=true;});
   const row=await P('/outbox',{conversation_id:window.CURCONV,body});
   const r=await P('/outbox/confirm',{id:row.id});
-  if(r.ok){ta.value='';cancelSend();toast('已发送 ✅');loadOutbox();
-    const ms=document.getElementById('msgs');ms.insertAdjacentHTML('beforeend','<div class="m out"><div class=bub>'+esc(body)+'</div><span class=t>刚刚</span></div>');ms.scrollTop=ms.scrollHeight;}
+  if(r.ok){ta.value='';cancelSend();toast('已发送 ✅');loadOutbox();_appendOutBubble(window.CURCONV,body);}
   else{c.className='err';c.innerHTML='<span class=txt>发送失败：'+esc(r.error||'未知')+'</span>'+
     ' <button class=go onclick="armSend()">重试</button> <button onclick="cancelSend()">取消</button>';}}
 async function openConv(id){window.CURCONV=id;cancelSend();document.body.classList.add('m-chat');const m=await E('/conversations/'+id+'/messages');
@@ -1237,9 +1277,10 @@ async function dismissSug(id){await P('/suggestions/dismiss',{id});loadSuggestio
 async function loadOutbox(){const o=await E('/outbox');document.getElementById('outbox').innerHTML=
  o.map(x=>`<div class=ob><div class=p>→ ${esc(x.chat_id)} <span class=badge>${esc(x.platform)}</span></div>
  <div class=b>${esc(x.body)}</div>
- <button class=send onclick="confirmOutbox(${x.id})">✅ 确认发送</button>
+ <button class=send onclick="confirmOutbox(${x.id},${x.conversation_id},${JSON.stringify(x.body)})">✅ 确认发送</button>
  <button onclick="cancelOutbox(${x.id})">✕ 取消</button></div>`).join('')||'<div class=p style=padding:8px>(无待发送)</div>'}
-async function confirmOutbox(id){const r=await P('/outbox/confirm',{id});
+async function confirmOutbox(id,cid,body){const r=await P('/outbox/confirm',{id});
+ if(r.ok&&cid!=null&&body!=null)_appendOutBubble(cid,body);
  alert(r.ok?'已发送 ✅':'发送失败：'+(r.error||'未知'));loadOutbox()}
 async function cancelOutbox(id){await P('/outbox/cancel',{id});loadOutbox()}
 async function loadPersons(){const ps=await E('/persons');document.getElementById('persons').innerHTML=
@@ -1386,7 +1427,7 @@ async function doAutoSend(cid){
  const draft=window.AUTODRAFTS[cid];if(draft==null){toast('草稿已失效，未发送');loadAutocomms();return;}
  try{const row=await P('/outbox',{conversation_id:cid,body:draft});
   const r=await P('/outbox/confirm',{id:row.id});
-  if(r.ok){toast('已自动发送 ✅');}else{toast('发送失败：'+(r.error||'未知'));}
+  if(r.ok){toast('已自动发送 ✅');_appendOutBubble(cid,draft);}else{toast('发送失败：'+(r.error||'未知'));}
  }catch(e){toast('发送失败：'+e);}
  loadAutocomms();loadOutbox();}
 async function toggleKill(on){await P('/killswitch',{on});toast(on?'🛑 已全局刹车':'已恢复自动回');loadAutocomms();}
