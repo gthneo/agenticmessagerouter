@@ -1,0 +1,17 @@
+{
+  "schema": "message.canonical/1",
+  "channel": "wechat",
+  "direction": "out",
+  "kind": "quote",
+  "text": "好的，按这个版本改",
+  "ts": 1750001000,
+  "sender": "王五",
+  "sender_id": "wxid_test_wangwu",
+  "is_mentioned": false,
+  "msg_id": "srv_900100003",
+  "quote": {
+    "author": "张三",
+    "refKind": "file",
+    "refText": "Q2-report.pdf"
+  }
+}

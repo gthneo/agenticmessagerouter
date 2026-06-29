@@ -173,9 +173,13 @@ class FullWechatAdapter(ingest.IngestAdapter):
     tool = "fullwechat"
     can_send = True
 
-    def __init__(self, url=None, token=None):
+    def __init__(self, url=None, token=None, validate_conn=None):
         self.url = (url or _default_url()).rstrip("/")  # 每次实例化读最新地址(设置可改 FQDN)
         self.token = token or _token()
+        # OPT-IN runtime contract boundary check: if a DB conn is set, each fetched batch
+        # of canonical envelopes is validate-and-warned (gated by contract_validate_enabled).
+        # Set by ingest_run.ignite; None in unit tests / send-only use → no validation.
+        self.validate_conn = validate_conn
 
     def _get(self, path):
         req = urllib.request.Request(self.url + path,
@@ -204,6 +208,12 @@ class FullWechatAdapter(ingest.IngestAdapter):
 
     def _messages(self, chat_id, limit, offset):
         raw = self._get(f"/api/messages/{quote(chat_id, safe='')}?limit={limit}&offset={offset}")
+        if self.validate_conn is not None:   # opt-in boundary check (validate-and-warn only)
+            try:
+                from .. import contract_validate
+                contract_validate.check_and_log(self.validate_conn, raw, channel=self.platform)
+            except Exception:                # never let validation break ingest (人在回路兜底)
+                pass
         return [map_message(m) for m in raw]
 
     def backfill(self, account, conv, cursor):

@@ -1,0 +1,24 @@
+# CODEOWNERS — agentic-contracts 生态契约真相源
+#
+# 每份契约的 owner-reviewer。GitHub 按本文件自动把对应目录的 PR 派给 owner review。
+# 王总钦定：AMR（@gthneo）统一拥有所有业务契约（含 moments-publish），不按"谁起草谁持有"分散。
+# 唯一例外：ops-agent/ 由 fullwechat 持有（约束"怎么运维 fullwechat 后端自己"）。
+#
+# 注：@gthneo 是 AMR 的 GitHub handle 占位；fullwechat 团队的 handle 待补
+# （下面以注释标出 "fullwechat 持有"，建仓接 GitHub 后替换为其真实 handle/team）。
+
+# 默认：仓内未单独指派的一切（含 README / VERSIONING / CODEOWNERS 自身）归 AMR
+*                       @gthneo
+
+# 业务契约 —— 全部 AMR/@gthneo 持有
+/message/               @gthneo
+/send-target/           @gthneo
+/group-metadata/        @gthneo
+/moments/               @gthneo
+/control-and-voice/     @gthneo
+/VERSIONING.md          @gthneo
+
+# 运维契约 —— fullwechat 持有（非 AMR）。
+# fullwechat 持有：约束 fullwechat 后端自身的可观测/运维面，变更由 fullwechat 批。
+# TODO：接 GitHub 后把下面的 @gthneo 占位替换为 fullwechat 团队的真实 handle/team。
+/ops-agent/             @gthneo  # fullwechat 持有

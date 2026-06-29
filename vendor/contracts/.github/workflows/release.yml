@@ -1,0 +1,36 @@
+# Release workflow — on a v* tag, publish a GitHub Release with a tarball of the contracts.
+#
+# The TAG is the language-agnostic artifact of the A/A/先A后B mechanism: tagging cuts a
+# Release whose tarball (specs + fixtures) any consumer can vendor at a pinned version,
+# regardless of language. Consumers pull this tag via their own sync-contracts script
+# (reference impl: AMR `scripts/sync-contracts.sh`).
+#
+# Minimal + standard: actions/checkout + softprops/action-gh-release.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build tarball (specs + fixtures)
+        run: |
+          # Archive the tag's tracked tree (no .git, no untracked drift) as the artifact.
+          git archive --format=tar.gz -o "agentic-contracts-${GITHUB_REF_NAME}.tar.gz" "${GITHUB_REF_NAME}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "agentic-contracts ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: agentic-contracts-${{ github.ref_name }}.tar.gz

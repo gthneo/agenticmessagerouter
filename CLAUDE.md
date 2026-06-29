@@ -43,6 +43,13 @@ jl                                  # 全员 sweep
 
 `~/bin/jl` 是薄壳 exec venv 入口；v0.4 原型备份 `~/bin/jl-v0.4.bak`。
 
+## 契约依赖（vendored）
+
+契约真相源 = `agentic-contracts` 仓；`vendor/contracts/` 是 pin 在 `CONTRACTS_VERSION` 的只读副本，
+**别在这里改，改走那个仓的 PR**；`scripts/sync-contracts.sh` 升级版本。运行时边界校验（msg_key
+碰撞检测 + canonical 结构校验）是这套契约的「牙齿」，见 `src/jl/contract_validate.py` 与
+`db.insert_messages`，并在 `/api/health` 暴露 `contract_violations_24h`。
+
 ## How to work here
 
 - Read this file and `README.md` first.

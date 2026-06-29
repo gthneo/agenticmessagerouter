@@ -268,6 +268,13 @@ def api_health(conn, *, now=None, probe=_probe_backend, propose=None):
     errors_24h = int(failed_recent)
     last_ev = conn.execute("SELECT MAX(ts) FROM events").fetchone()[0]
 
+    # contract_violations_24h — runtime contract-boundary alarms (msg_key collisions +
+    # schema drift) in the last 24h. PII-FREE: a COUNT only. So the ops Agent sees
+    # contract drift / the 2026-06-28 silent-drop class of bug going LOUD.
+    contract_viol_24h = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE kind='contract_violation' AND ts>=?",
+        (now - 86400,)).fetchone()[0]
+
     return {
         "amr_version": __version__,
         "ok": True,
@@ -278,6 +285,7 @@ def api_health(conn, *, now=None, probe=_probe_backend, propose=None):
         "outbox": {"pending": int(pending), "failed_recent": int(failed_recent)},
         "backends": backends,
         "events_recent": {"errors_24h": errors_24h},
+        "contract_violations_24h": int(contract_viol_24h),
         "last_event_ts": int(last_ev) if last_ev is not None else None,
     }
 

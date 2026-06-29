@@ -16,6 +16,12 @@ def ignite(conn, adapter, *, account_id, recent_limit=30, actor="cli"):
     Groups arrive muted (the adapter sets ConvRecord.muted). Returns messages inserted."""
     inserted = 0
     convs = 0
+    # OPT-IN runtime contract boundary check: hand the adapter the conn so it validate-
+    # and-warns each canonical envelope it fetches (gated by contract_validate_enabled,
+    # default on). Adapters without this attr (lark…) are unaffected.
+    if hasattr(adapter, "validate_conn") and adapter.validate_conn is None:
+        if db.get_setting(conn, "contract_validate_enabled", "1") != "0":
+            adapter.validate_conn = conn
     for conv, msgs in adapter.pull_new(account_for(conn, account_id), recent_limit=recent_limit):
         _, n = db.ingest_records(conn, account_id=account_id, platform=adapter.platform,
                                  conv=conv, msgs=msgs)
