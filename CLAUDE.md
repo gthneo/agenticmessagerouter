@@ -50,6 +50,25 @@ jl                                  # 全员 sweep
 碰撞检测 + canonical 结构校验）是这套契约的「牙齿」，见 `src/jl/contract_validate.py` 与
 `db.insert_messages`，并在 `/api/health` 暴露 `contract_violations_24h`。
 
+## 契约治理铁律 / 开工先读
+
+> 单账号(gthneo)下无天然身份分权，治理靠**机器强制 + agent 级分权**。治理总章在契约仓
+> `agentic-contracts/GOVERNANCE.md`，本节是 AMR 这个**消费方**侧的落地纪律。
+
+1. **开工先读** `vendor/contracts/00-CONSTITUTION.md`（0 号宪法·根契约）+ 相关技术契约
+   （`vendor/contracts/message/canonical.md` 等）。任何碰对外动作/自动挡/人审窗/Agent 决策权的
+   改动，都要能追溯到 0 号宪法、不踩红线。
+2. **改契约只走 agentic-contracts 仓 PR**——口径有疑义/要改，**回那个仓提 PR 改契约**，
+   **绝不在 AMR 本地打补丁绕契约**（本地硬编码私自解释 = 隐蔽漂移）。
+3. **绝不手改 `vendor/contracts/`**——它是 pin 在 `CONTRACTS_VERSION` 的**只读副本**；
+   升级版本走 `scripts/sync-contracts.sh`（拉新 tag → 人审 diff → commit），不在副本里就地改。
+4. **merge 契约相关改动前跑 conformance**——`pytest tests/test_conformance_fixtures.py`
+   （AMR 实现持续对着 `vendor/contracts/fixtures/` 自检，红 = 实现漂离契约）+
+   `tests/test_vendor_drift.py`（vendored 副本没被本地手改）。
+5. **宪法敏感改动须独立 agent 审**——契约变更 / 碰宪法红线的功能，须由一个**非作者的 fresh
+   Claude Code agent** 对着 `vendor/contracts/00-CONSTITUTION.md` 做对抗式审查（作者 agent ≠
+   审查 agent），结论贴进 PR，再由人 merge。
+
 ## How to work here
 
 - Read this file and `README.md` first.
