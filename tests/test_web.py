@@ -382,10 +382,41 @@ def test_api_unlink_no_link_returns_gracefully():
     assert res["ok"] is False and res["freed"] is None
 
 
-def test_index_html_has_token_gate_and_localstorage_entry():
-    """稳定入口: 页面必须自带 token 解析(URL→localStorage)+ 401 登录闸, 这样收藏
-    /AMR.html(不带 token)也能用。这些字符串在则行为在; 缺则回归(用户「看不到入口」)。"""
+def test_index_html_has_login_gate_and_localstorage_entry():
+    """稳定入口: 页面必须自带 token 解析(URL→localStorage)+ 401 登录闸(用户名密码 or
+    token), 这样收藏 /AMR.html(不带 token)也能用。缺则回归(用户「看不到入口」)。"""
     html = web._index_html()
     assert "amr_token" in html          # localStorage 记住 token 的键
-    assert "_showTokenGate" in html     # 无/失效 token 时的一次性登录闸
+    assert "_loginGate" in html         # 用户名/密码登录表单
+    assert "_tokenGate" in html         # 无密码时退回 token 框
+    assert "/api/login" in html         # 登录走的 endpoint
     assert "function boot(" in html     # 走 401 探针再决定加载 or 闸
+
+
+def test_api_login_success_returns_token(tmp_path, monkeypatch):
+    from jl import webauth
+    p = str(tmp_path / "web_auth.json")
+    webauth.set_auth("wang", "secret123", path=p)
+    monkeypatch.setattr(webauth, "AUTH_PATH", p)
+    monkeypatch.setenv("JL_WEB_TOKEN", "TOK123")
+    r = web.api_login({"user": "wang", "pass": "secret123"})
+    assert r["ok"] is True and r["token"] == "TOK123"
+
+
+def test_api_login_wrong_password_no_token(tmp_path, monkeypatch):
+    from jl import webauth
+    p = str(tmp_path / "web_auth.json")
+    webauth.set_auth("wang", "secret123", path=p)
+    monkeypatch.setattr(webauth, "AUTH_PATH", p)
+    monkeypatch.setenv("JL_WEB_TOKEN", "TOK123")
+    r = web.api_login({"user": "wang", "pass": "WRONG"})
+    assert r["ok"] is False and "token" not in r
+
+
+def test_api_auth_mode_reflects_config(tmp_path, monkeypatch):
+    from jl import webauth
+    p = str(tmp_path / "web_auth.json")
+    monkeypatch.setattr(webauth, "AUTH_PATH", p)
+    assert web.api_auth_mode()["mode"] == "token"   # not configured yet
+    webauth.set_auth("wang", "secret123", path=p)
+    assert web.api_auth_mode()["mode"] == "password"

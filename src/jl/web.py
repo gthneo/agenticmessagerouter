@@ -13,6 +13,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from . import db
 from . import ingest
 from . import autocomms
+from . import webauth
 from .version import CONSUMES, __version__
 from . import digest as _digest
 from . import lifecycle as _lifecycle
@@ -640,6 +641,25 @@ def _auth_ok(headers, params):
     return got == want
 
 
+def api_auth_mode():
+    """PUBLIC (no token): tell the page which front door to show — 'password' if a
+    username/password has been set up (jl.webauth), else 'token' (raw-token gate). No
+    secrets leak; just which gate to render."""
+    return {"mode": "password" if webauth.is_configured() else "token"}
+
+
+def api_login(payload):
+    """PUBLIC (no token): exchange a valid username/password for the real JL_WEB_TOKEN,
+    which the browser then remembers (localStorage). The password is verified against a
+    salted PBKDF2 hash — never compared in plaintext, never stored. On failure, a flat
+    'wrong credentials' (no user-enumeration hint)."""
+    user = payload.get("user", "")
+    pw = payload.get("pass", "")
+    if webauth.verify(user, pw):
+        return {"ok": True, "token": os.environ.get("JL_WEB_TOKEN", "")}
+    return {"ok": False, "error": "用户名或密码错误"}
+
+
 def make_handler(db_path):
     class H(BaseHTTPRequestHandler):
         def _send(self, code, body, ctype="application/json; charset=utf-8"):
@@ -661,6 +681,9 @@ def make_handler(db_path):
                 # identity endpoint — no token (mirror of the backend's public
                 # /api/status.version); lets an Agent/ops discover AMR before auth.
                 return self._send(200, api_version())
+            if u.path == "/api/auth-mode":
+                # PUBLIC: which login gate to render (password vs raw-token). No secret.
+                return self._send(200, api_auth_mode())
             if u.path == "/api/uitrace/config":
                 # PII-free telemetry on/off flag — public (no token), like /api/version;
                 # the page reads it before deciding whether to log. No data egress.
@@ -735,6 +758,15 @@ def make_handler(db_path):
         def do_POST(self):
             u = urlparse(self.path)
             params = {k: v[0] for k, v in parse_qs(u.query).items()}
+            if u.path == "/api/login":
+                # PUBLIC (no token): the auth-granting endpoint itself — verifies
+                # user/password and returns the token. Must run BEFORE _auth_ok.
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                try:
+                    payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                except ValueError:
+                    return self._send(400, {"error": "bad json"})
+                return self._send(200, api_login(payload))
             if not _auth_ok(self.headers, params):
                 return self._send(401, {"error": "unauthorized"})
             if u.path not in ("/api/ingest", "/api/link", "/api/outbox",
@@ -1454,22 +1486,43 @@ document.getElementById('q').addEventListener('keydown',async e=>{if(e.key!=='En
 document.getElementById('msgs').addEventListener('scroll',()=>{if(window.CURCONV!=null)window.SCROLLPOS[window.CURCONV]=document.getElementById('msgs').scrollTop;});
 // 快捷键: 在回复框里 Ctrl+Enter(Win/Linux) / Cmd+Enter(Mac) = 发送(走 armSend 倒计时否决窗, 不直发)
 document.getElementById('reply').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();armSend();}});
-// 登录闸: 无 token / token 失效(401) 时, 不再静默空白, 给一个一次性输入框, 存本机后进入。
-function _showTokenGate(){document.body.innerHTML=
- '<div style="max-width:340px;margin:14vh auto;padding:24px;font-family:system-ui;text-align:center">'+
- '<h2 style="margin:0 0 4px">AMR 收件箱</h2>'+
- '<div style="color:#888;font-size:13px;margin-bottom:16px">需要访问令牌(token)才能加载会话</div>'+
- '<input id=_tk type=password placeholder=" 粘贴 token" style="width:100%;padding:10px;font-size:14px;box-sizing:border-box;margin-bottom:10px">'+
- '<button id=_tkgo style="width:100%;padding:10px;font-size:14px;cursor:pointer">进入</button>'+
- '<div style="color:#aaa;font-size:11px;margin-top:10px">token 只存在本机浏览器, 不上传</div></div>';
+// 登录闸: 无 token / token 失效(401) 时不再静默空白。优先用用户名+密码(若已设置),
+// 否则退回 token 框。登录成功后服务端把 token 发回, 存本机 localStorage, 以后只输一次。
+function _gateBox(inner){document.body.innerHTML=
+ '<div style="max-width:340px;margin:13vh auto;padding:24px;font-family:system-ui;text-align:center">'+
+ '<h2 style="margin:0 0 4px">AMR 收件箱</h2>'+inner+'</div>';}
+function _tokenGate(){_gateBox(
+ '<div style="color:#888;font-size:13px;margin-bottom:16px">粘贴访问令牌(token)进入</div>'+
+ '<input id=_tk type=password placeholder=" token" style="width:100%;padding:10px;font-size:14px;box-sizing:border-box;margin-bottom:10px">'+
+ '<button id=_go style="width:100%;padding:10px;font-size:14px;cursor:pointer">进入</button>'+
+ '<div style="color:#aaa;font-size:11px;margin-top:10px">token 只存本机, 不上传</div>');
  function go(){var v=document.getElementById('_tk').value.trim();if(!v)return;
   try{localStorage.setItem('amr_token',v);}catch(e){}location.href=location.pathname;}
- document.getElementById('_tkgo').onclick=go;
+ document.getElementById('_go').onclick=go;
  document.getElementById('_tk').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
  document.getElementById('_tk').focus();}
+function _loginGate(){_gateBox(
+ '<div style="color:#888;font-size:13px;margin-bottom:16px">用用户名 + 密码登录</div>'+
+ '<input id=_u placeholder=" 用户名" autocomplete=username style="width:100%;padding:10px;font-size:14px;box-sizing:border-box;margin-bottom:8px">'+
+ '<input id=_p type=password placeholder=" 密码" autocomplete=current-password style="width:100%;padding:10px;font-size:14px;box-sizing:border-box;margin-bottom:10px">'+
+ '<button id=_go style="width:100%;padding:10px;font-size:14px;cursor:pointer">登录</button>'+
+ '<div id=_err style="color:#c0392b;font-size:12px;margin-top:8px;min-height:16px"></div>');
+ async function go(){var u=document.getElementById('_u').value.trim(),p=document.getElementById('_p').value;
+  if(!u||!p)return;document.getElementById('_err').textContent='';
+  try{var r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:u,pass:p})});
+   var j=await r.json();
+   if(j.ok&&j.token){try{localStorage.setItem('amr_token',j.token);}catch(e){}location.href=location.pathname;return;}
+   document.getElementById('_err').textContent=j.error||'登录失败';}
+  catch(e){document.getElementById('_err').textContent='网络错误';}}
+ document.getElementById('_go').onclick=go;
+ document.getElementById('_p').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
+ document.getElementById('_u').focus();}
+async function _showGate(){var mode='token';
+ try{var r=await fetch('/api/auth-mode');var j=await r.json();mode=(j&&j.mode)||'token';}catch(e){}
+ if(mode==='password')_loginGate();else _tokenGate();}
 async function boot(){
  try{var r=await fetch('/api/conversations'+(TOK?'?token='+encodeURIComponent(TOK):''));
-   if(r.status===401){_showTokenGate();return;}}catch(e){}
+   if(r.status===401){_showGate();return;}}catch(e){}
  loadProactive();loadPersons();loadCands();loadConvs();loadOutbox();applySkin();}
 boot();
 // ---- PII-FREE UI 交互埋点 (AI 时代 UI 自优化回路) ----------------------------
