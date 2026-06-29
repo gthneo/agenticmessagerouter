@@ -1,0 +1,12 @@
+{
+  "schema": "message.canonical/1",
+  "channel": "wechat",
+  "direction": "in",
+  "kind": "text",
+  "text": "好的，按这个版本改",
+  "ts": 1750000000,
+  "sender": "张三",
+  "sender_id": "wxid_test_zhangsan",
+  "is_mentioned": false,
+  "msg_id": "srv_900100001"
+}

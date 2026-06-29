@@ -1,0 +1,12 @@
+{
+  "schema": "message.canonical/1",
+  "channel": "wechat",
+  "direction": "in",
+  "kind": "text",
+  "text": "@李四 这个能今天给我吗",
+  "ts": 1750000600,
+  "sender": "张三",
+  "sender_id": "wxid_test_zhangsan",
+  "is_mentioned": true,
+  "msg_id": "srv_900100002"
+}
