@@ -695,6 +695,9 @@ def cmd_account_onboard(conn, params, *, fetch=None):
                 print(f"⚠️ 跳过: 后端不可达 ({pre.get('error', 'unreachable')}) — 不接, 一个坏后端不影响其余")
             elif pre["reason"] == "no_user":
                 print("⚠️ 跳过: /api/status/auth 未返回 loggedInUser — 响应异常, 不接")
+            elif pre["reason"] == "logged_out":
+                print(f"⚠️ 跳过: 身份对 ({pre['logged_in']}) 但微信当前未登录 (logged_out) — "
+                      f"先让该号在后端扫码/确认登录, 再接 (防绑登出死号, 否则拉空当 0 互动)")
             else:
                 print(f"⚠️ 跳过: 预检失败 ({pre['reason']})")
             continue

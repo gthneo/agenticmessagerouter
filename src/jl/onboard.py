@@ -183,6 +183,28 @@ def _base_wxid(logged_in, self_id):
     return db._canon_identifier("wechat", logged_in)
 
 
+def _is_live(resp):
+    """Does the backend's auth status indicate a **usable (logged-in) session**?
+    Identity-correct but logged-out (the 2026-07-01 .28 case: WeChat sitting on the
+    login screen) must NOT be onboarded — it would bind a dead account that ingests
+    nothing and looks like 0 互动. Gate order:
+      - explicit top-level `status` wins: `logged_in` → live; logged_out/logging_in/
+        login_required → not live;
+      - else fall back to `signals.chatsListPresent` (no chat list = not usable);
+      - else (legacy backend with no liveness signal at all) → lenient True, preserving
+        the original preflight contract.
+    """
+    status = (resp or {}).get("status")
+    if status == "logged_in":
+        return True
+    if status in ("logged_out", "logging_in", "login_required"):
+        return False
+    sig = (resp or {}).get("signals") or {}
+    if "chatsListPresent" in sig:
+        return bool(sig.get("chatsListPresent"))
+    return True
+
+
 def preflight_identity(entry, *, fetch=_get_json, timeout=10):
     """The safety gate. Ask the backend who it's logged in as and compare to the
     configured ``self_id``. Returns a dict; NEVER raises (one bad backend must not
@@ -192,6 +214,7 @@ def preflight_identity(entry, *, fetch=_get_json, timeout=10):
       ok=False reason=unreachable      → fetch raised (host down / refused)
       ok=False reason=no_user          → response lacked loggedInUser
       ok=False reason=mismatch         → backend reports a DIFFERENT account
+      ok=False reason=logged_out       → identity matches but session not live (防绑死号)
     Carries logged_in / base / self_id for the warning and the audit trail.
     """
     self_id = (entry.get("self_id") or "").strip()
@@ -209,9 +232,15 @@ def preflight_identity(entry, *, fetch=_get_json, timeout=10):
         return {"ok": False, "reason": "no_user", "self_id": self_id,
                 "logged_in": None, "base": None}
     base = _base_wxid(logged_in, self_id)
-    ok = bool(self_id) and (
+    id_ok = bool(self_id) and (
         logged_in == self_id or base == self_id or logged_in.startswith(self_id + "_"))
-    return {"ok": ok, "reason": None if ok else "mismatch", "self_id": self_id,
+    if not id_ok:                                # wrong account is the headline danger
+        return {"ok": False, "reason": "mismatch", "self_id": self_id,
+                "logged_in": logged_in, "base": base}
+    if not _is_live(resp):                       # identity right but session not live
+        return {"ok": False, "reason": "logged_out", "self_id": self_id,
+                "logged_in": logged_in, "base": base}
+    return {"ok": True, "reason": None, "self_id": self_id,
             "logged_in": logged_in, "base": base}
 
 

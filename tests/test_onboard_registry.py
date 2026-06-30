@@ -88,6 +88,52 @@ def test_preflight_mismatch_is_not_ok(tmp_path):
     assert pre["logged_in"] == "wxid_other_x9"
 
 
+# ----- login-state gate (防绑登出/死号) — identity right but session not live ----
+
+def test_preflight_logged_out_blocks_even_if_identity_matches(tmp_path):
+    # .28 real case (2026-07-01): identity correct (wangliren123_2325) but logged out.
+    # Binding it would create a dead account that ingests nothing → must NOT be ok.
+    entry = _entry(self_id="wxid_test_abc", token_file=_token_file(tmp_path))
+    pre = onboard.preflight_identity(entry, fetch=lambda *a, **k: {
+        "loggedInUser": "wxid_test_abc_d12", "status": "logged_out",
+        "signals": {"chatsListPresent": False, "view": "login_account"}})
+    assert pre["ok"] is False
+    assert pre["reason"] == "logged_out"
+    assert pre["logged_in"] == "wxid_test_abc_d12"   # identity carried for the audit trail
+
+
+def test_preflight_logged_in_status_is_ok(tmp_path):
+    entry = _entry(self_id="wxid_test_abc", token_file=_token_file(tmp_path))
+    pre = onboard.preflight_identity(entry, fetch=lambda *a, **k: {
+        "loggedInUser": "wxid_test_abc_d12", "status": "logged_in",
+        "signals": {"chatsListPresent": True}})
+    assert pre["ok"] is True and pre["reason"] is None
+
+
+def test_preflight_no_chatlist_blocks_when_no_status(tmp_path):
+    # backend omits a top-level status but signals show the chat list is absent → not live
+    entry = _entry(self_id="wxid_test_abc", token_file=_token_file(tmp_path))
+    pre = onboard.preflight_identity(entry, fetch=lambda *a, **k: {
+        "loggedInUser": "wxid_test_abc_d12", "signals": {"chatsListPresent": False}})
+    assert pre["ok"] is False and pre["reason"] == "logged_out"
+
+
+def test_preflight_lenient_when_no_liveness_signal(tmp_path):
+    # legacy backends report only loggedInUser (no status, no signals) → don't block
+    # on liveness (back-compat with the original preflight contract).
+    entry = _entry(self_id="wxid_test_abc", token_file=_token_file(tmp_path))
+    pre = onboard.preflight_identity(entry, fetch=lambda *a, **k: {"loggedInUser": "wxid_test_abc_d12"})
+    assert pre["ok"] is True and pre["reason"] is None
+
+
+def test_preflight_mismatch_takes_precedence_over_liveness(tmp_path):
+    # wrong account AND logged out → the identity mismatch is the headline (more dangerous)
+    entry = _entry(self_id="wxid_test_abc", token_file=_token_file(tmp_path))
+    pre = onboard.preflight_identity(entry, fetch=lambda *a, **k: {
+        "loggedInUser": "wxid_other_x9", "status": "logged_out"})
+    assert pre["ok"] is False and pre["reason"] == "mismatch"
+
+
 def test_preflight_unreachable_is_graceful(tmp_path):
     entry = _entry(token_file=_token_file(tmp_path))
 
