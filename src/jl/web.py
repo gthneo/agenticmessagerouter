@@ -314,6 +314,12 @@ def api_health(conn, *, now=None, probe=_probe_backend, propose=None):
         "SELECT COUNT(*) FROM events WHERE kind='contract_violation' AND ts>=?",
         (now - 86400,)).fetchone()[0]
 
+    # read_unavailable_24h — 后端报「读不到」的会话数(契约 §6.4)。PII-FREE: 只 COUNT。
+    # 让运维/用户看到"有 N 个会话读不到"(≠0 互动)，对应家人雷达不该被静默漏报。
+    read_unavail_24h = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE kind='read_unavailable' AND ts>=?",
+        (now - 86400,)).fetchone()[0]
+
     return {
         "amr_version": __version__,
         "ok": True,
@@ -325,6 +331,7 @@ def api_health(conn, *, now=None, probe=_probe_backend, propose=None):
         "backends": backends,
         "events_recent": {"errors_24h": errors_24h},
         "contract_violations_24h": int(contract_viol_24h),
+        "read_unavailable_24h": int(read_unavail_24h),
         "last_event_ts": int(last_ev) if last_ev is not None else None,
     }
 

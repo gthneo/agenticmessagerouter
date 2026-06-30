@@ -30,6 +30,13 @@ def ignite(conn, adapter, *, account_id, recent_limit=30, actor="cli"):
     db.log_event(conn, kind="ignite", actor=actor,
                  detail={"account_id": account_id, "conversations": convs,
                          "inserted": inserted})
+    # 契约 §6.4：把后端报「读不到」的会话响亮记下来（一条 read_unavailable 事件/会话），
+    # 让它在 /api/health 计数、不被当成「0 互动」静默吞掉（家人雷达漏报的根因）。
+    if hasattr(adapter, "drain_unreadable"):
+        for u in adapter.drain_unreadable():
+            db.log_event(conn, kind="read_unavailable", actor=actor,
+                         detail={"account_id": account_id, "chat_id": u.get("chat_id", ""),
+                                 "reason": u.get("reason", ""), "coverage": u.get("coverage", {})})
     # scoped auto-draft on freshly ingested inbound + proactive openers for
     # watched/🔴 relationships (both LLM-optional; never block ingest, never send)
     try:

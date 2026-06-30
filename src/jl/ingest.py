@@ -8,7 +8,41 @@ from __future__ import annotations
 
 import abc
 import hashlib
+import json
 from dataclasses import dataclass, field
+
+
+class ReadUnavailable(Exception):
+    """A read could NOT be performed — contract §6.4 `read_unavailable` (shard key
+    missing / message table unmapped / coverage unconfirmable). **Distinct from
+    "genuinely zero messages"**: the caller must record it and NOT treat the conversation
+    as 0 互动 (that误判 is exactly the 哑失败 this contract clause exists to eliminate)."""
+
+    def __init__(self, chat_id="", reason="unknown", coverage=None, channel=""):
+        self.chat_id = chat_id
+        self.reason = reason
+        self.coverage = coverage or {}
+        self.channel = channel
+        super().__init__(f"read_unavailable chat={chat_id} reason={reason}")
+
+
+def parse_read_unavailable(body, *, fallback_chat_id=""):
+    """If `body` (dict or JSON str) is a contract read_unavailable error envelope
+    (`{"error":{"code":"read_unavailable",...}}`), return a `ReadUnavailable`; else None.
+    Pure, never raises. An empty array / normal payload → None (it is NOT a signal)."""
+    try:
+        d = body if isinstance(body, dict) else json.loads(body or "")
+    except (ValueError, TypeError):
+        return None
+    err = d.get("error") if isinstance(d, dict) else None
+    if not isinstance(err, dict) or err.get("code") != "read_unavailable":
+        return None
+    return ReadUnavailable(
+        chat_id=err.get("chatId") or fallback_chat_id,
+        reason=err.get("reason") or "unknown",
+        coverage=err.get("coverage") or {},
+        channel=err.get("channel") or "",
+    )
 
 
 @dataclass

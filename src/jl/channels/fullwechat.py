@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from .. import ingest
 from ..version import __version__
@@ -105,6 +106,13 @@ _SKIP_PREFIXES = ("gh_", "placeholder", "_")
 _SKIP_IDS = {"brandsessionholder"}
 
 
+def _chat_from_messages_path(path):
+    """Extract the chat id from a `/api/messages/<urlquoted>?...` path — the fallback
+    chatId for a read_unavailable signal whose body omitted it. '' if not a messages path."""
+    m = re.search(r"/api/messages/([^?]+)", path or "")
+    return unquote(m.group(1)) if m else ""
+
+
 def _token():
     t = os.environ.get("AGENT_WECHAT_TOKEN")
     if t:
@@ -184,8 +192,20 @@ class FullWechatAdapter(ingest.IngestAdapter):
     def _get(self, path):
         req = urllib.request.Request(self.url + path,
                                      headers=_auth_headers(self.token))
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            # 契约 §6.4：读不可用 = HTTP 409 + {error:{code:"read_unavailable",...}}。
+            # 翻成 ReadUnavailable 让上层逐会话处理（标"读不到"、不当 0 互动），而不是
+            # 让一个会话的 409 把整账号 poll 抛断（2026-07-01 实测 .178 poll 哑火根因）。
+            if e.code == 409:
+                ru = ingest.parse_read_unavailable(
+                    e.read().decode("utf-8", "replace"),
+                    fallback_chat_id=_chat_from_messages_path(path))
+                if ru is not None:
+                    raise ru from None
+            raise
 
     def list_conversations(self, account, limit=50, offset=0):
         chats = self._get(f"/api/chats?limit={limit}&offset={offset}")
@@ -207,6 +227,8 @@ class FullWechatAdapter(ingest.IngestAdapter):
         return out
 
     def _messages(self, chat_id, limit, offset):
+        # _get raises ingest.ReadUnavailable on a 409 read-unavailable (契约 §6.4);
+        # callers (pull_new/backfill) catch it per-conv so it never aborts the account.
         raw = self._get(f"/api/messages/{quote(chat_id, safe='')}?limit={limit}&offset={offset}")
         if self.validate_conn is not None:   # opt-in boundary check (validate-and-warn only)
             try:
@@ -216,18 +238,43 @@ class FullWechatAdapter(ingest.IngestAdapter):
                 pass
         return [map_message(m) for m in raw]
 
+    def _note_unreadable(self, conv, ru):
+        """Record a 读不到 conversation (contract read_unavailable) so the orchestrator
+        can surface it (event + health count) instead of letting it look like 0 互动."""
+        if not hasattr(self, "_unreadable") or self._unreadable is None:
+            self._unreadable = []
+        self._unreadable.append({"chat_id": ru.chat_id or conv.chat_id,
+                                 "reason": ru.reason, "coverage": ru.coverage})
+
+    def drain_unreadable(self):
+        """Return + clear the 读不到 conversations collected since the last drain."""
+        u = getattr(self, "_unreadable", None) or []
+        self._unreadable = []
+        return u
+
     def backfill(self, account, conv, cursor):
         offset = int(cursor or "0")
-        page = self._messages(conv.chat_id, 200, offset)
+        try:
+            page = self._messages(conv.chat_id, 200, offset)
+        except ingest.ReadUnavailable as ru:
+            self._note_unreadable(conv, ru)      # 读不到 → 停在此会话, 不抛断
+            return [], ""
         nxt = "" if len(page) < 200 else str(offset + len(page))
         return page, nxt
 
     def pull_new(self, account, recent_limit=30):
-        """Return [(ConvRecord, [MsgRecord])] for every ingestable conversation,
-        each with its most recent `recent_limit` messages (dedup absorbs overlap)."""
+        """Return [(ConvRecord, [MsgRecord])] for every ingestable, READABLE conversation,
+        each with its most recent `recent_limit` messages (dedup absorbs overlap). A
+        conversation that returns 409 read_unavailable is **skipped (not yielded) and
+        recorded** — one unreadable chat must not abort the whole account's poll."""
+        self._unreadable = []
         out = []
         for conv in self.all_conversations(account):
-            out.append((conv, self._messages(conv.chat_id, recent_limit, 0)))
+            try:
+                out.append((conv, self._messages(conv.chat_id, recent_limit, 0)))
+            except ingest.ReadUnavailable as ru:
+                self._note_unreadable(conv, ru)
+                continue
         return out
 
     def _live_chat_ids(self):
