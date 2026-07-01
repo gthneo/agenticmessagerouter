@@ -350,10 +350,24 @@ def api_set_backend(conn, payload):
     return {"ok": True, "url": url}
 
 
+def _self_source(conn, kind, identifier):
+    """这条自我身份的「渠道源」—— 对应哪个接入账号。让用户看懂为什么会有多个变体
+    （wangliren123 / wangliren123_2325 / web321abc 其实是同号在不同接入下的形态）。
+    匹配不到现存账号 → 手工登记/从联系人认领。"""
+    canon = db._canon_identifier(kind, identifier)
+    for a in db.get_accounts(conn):
+        if a.get("platform") == kind and db._canon_identifier(kind, a.get("self_id") or "") == canon:
+            host = (a.get("host") or "").strip().replace("http://", "").replace("https://", "")
+            return f"账号#{a['account_id']} {a.get('tool') or '?'}" + (f"@{host}" if host else " 本地")
+    return "手工登记/联系人认领"
+
+
 def api_self(conn):
-    """SELF(自我) settings: registered own-identities + auto suggestions for HITL checkbox."""
-    return {"registered": db.get_self_identities(conn),
-            "suggestions": db.suggest_self_identities(conn)}
+    """SELF(自我) settings: registered own-identities (+ 渠道源) + auto suggestions."""
+    reg = db.get_self_identities(conn)
+    for s in reg:
+        s["source"] = _self_source(conn, s["kind"], s["identifier"])
+    return {"registered": reg, "suggestions": db.suggest_self_identities(conn)}
 
 
 def api_add_self(conn, payload):
@@ -1054,7 +1068,7 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
   <div style="display:flex;justify-content:space-between;align-items:center">
    <b>🔄 归一工作台</b><button class=go onclick="toggleUnify()">✕ 关闭</button></div>
   <div class=tag style="padding:2px 6px;color:var(--fg2);margin-bottom:4px">「归一」= 把散在多个微信号/电话里、其实<b>同一个人</b>的会话认成一个人；也把<b>你自己的号</b>标成「我」。下面分三块：① 已认作你的 ② 疑似你的（待你确认/擦掉）③ 联系人合并。</div>
-  <h2>🪞 ① 已认作「我」的号（这些号发的消息都算你发的）</h2><div id=self_reg></div>
+  <details style="margin:6px 0"><summary style="cursor:pointer;font-weight:700;font-size:1.05em">🪞 ① 已认作「我」的号（点开/收起 · 不常动 · 这些号发的都算你发的）</summary><div id=self_reg style="margin-top:6px"></div></details>
   <div class=sec style="margin-top:6px">🔎 ② 疑似你自己的号 —— 是你 → 「✅ 这是我」；不是 → 「✕ 不是我」擦掉(不再弹)</div><div id=self_sug></div>
   <h2>🧩 人归并候选</h2><div id=unify_cands></div>
   <h2>🧬 我是谁（用于 LLM·随时可改）</h2>
@@ -1382,6 +1396,7 @@ async function loadSettings(){
  document.getElementById('self_reg').innerHTML=(d.registered||[]).map(s=>
   `<div class=row><b>${esc(s.kind)}</b> <span class=id>${esc(s.identifier)}</span>
    ${personaSel(s.kind,s.identifier,s.persona)}<span class=tag>${s.label?' · '+esc(s.label):''}</span>
+   <span class=tag style="color:var(--fg2)" title="这条身份从哪个接入账号来的 — 解释为何同一个号有多个形态">· 源: ${esc(s.source||'?')}</span>
    <button class=x onclick="removeSelf('${esc(s.kind)}','${esc(s.identifier)}')">✕</button></div>`
   ).join('')||'<div class=tag style=padding:6px>(还没登记自我身份)</div>';
  document.getElementById('self_sug').innerHTML=(d.suggestions||[]).map(s=>{
@@ -1420,9 +1435,12 @@ async function delSafePhrase(id){await P('/safe-phrases/delete',{id});loadSafePh
 async function saveProfile(){await P('/self-profile',{profile:document.getElementById('selfprofile').value});toast('「我是谁」已保存 🧬')}
 async function removeSelf(kind,identifier){await P('/self/remove',{kind,identifier});loadSettings()}
 async function runReunify(reset){
- if(reset&&!confirm('复位会清掉自动归并(保留人工确认的),确定?'))return;
+ if(reset&&!confirm('「清空自动合并」会撤掉自动认的结果(你手工确认过的保留),确定?'))return;
  const r=await P('/reunify',{reset});
- document.getElementById('reuniout').textContent=`✅ 连接 ${r.linked} · 候选 ${r.candidates}`;
+ const msg=(r.linked||r.candidates)
+   ? `✅ 认人跑完：新把 ${r.linked} 组会话认到对应的人 · 发现 ${r.candidates} 个疑似同一人待你确认`
+   : '✅ 认人跑完：目前都已认好，没有新的要合并（连接0/候选0 = 正常，不是出错）';
+ document.getElementById('reuniout').textContent=msg;
  loadProactive();loadPersons();loadCands()}
 async function watchPerson(pid){await P('/watch',{person_id:pid,on:true});toast('已关注 ⭐');loadProactive()}
 async function connectChannel(pid,btn){const inp=btn.parentNode.querySelector('input'),chat_id=inp.value.trim();

@@ -61,3 +61,20 @@ def test_unify_ui_has_dismiss_and_plain_language():
     assert "dismissSelf" in html            # ✕ 不是我 的前端函数
     assert "/self/dismiss" in html          # dismiss endpoint
     assert "不是我" in html                  # 明确的拒绝动作文案
+
+
+def test_api_self_includes_source():
+    """每条已认作我的身份带「渠道源」，解释多变体从何而来。"""
+    c = _seed()  # account 5 self_id wxid_test_bandi2277
+    db.add_self_identity(c, "wechat", "wxid_test_bandi2277", persona="工作", label="测试")
+    res = web.api_self(c)
+    reg = res["registered"]
+    assert reg and all("source" in s for s in reg)
+    assert any("账号#5" in s["source"] for s in reg)   # 至少一条匹配到接入账号
+
+
+def test_unify_ui_collapsible_and_human_result():
+    html = web._index_html()
+    assert "<details" in html               # 「已认作我」可折叠
+    assert "渠道源" in html or "· 源:" in html  # 渠道源标注
+    assert "认人跑完" in html and "都已认好" in html  # 0/0 说人话
