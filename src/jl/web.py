@@ -366,6 +366,16 @@ def api_add_self(conn, payload):
     return {"ok": True}
 
 
+def api_self_dismiss(conn, payload):
+    """「✕ 不是我」: persistently dismiss a suggested self-candidate (it stops being
+    suggested). Reversible; does NOT add to self. 归一 UI 的 Delete 角 (#85)."""
+    kind, identifier = payload.get("kind", ""), payload.get("identifier", "")
+    db.dismiss_self_candidate(conn, kind, identifier)
+    db.log_event(conn, kind="self_dismiss", actor=payload.get("actor", "user"),
+                 detail={"kind": kind, "identifier": identifier})
+    return {"ok": True}
+
+
 def api_set_self_persona(conn, payload):
     db.set_self_persona(conn, payload["kind"], payload["identifier"], payload["persona"])
     return {"ok": True}
@@ -780,7 +790,7 @@ def make_handler(db_path):
                               "/api/outbox/confirm", "/api/outbox/cancel",
                               "/api/suggestions/dismiss", "/api/draft-assist",
                               "/api/matters", "/api/matters/status", "/api/diagnose",
-                              "/api/self", "/api/self/remove", "/api/self/person", "/api/self/persona", "/api/self-profile",
+                              "/api/self", "/api/self/remove", "/api/self/dismiss", "/api/self/person", "/api/self/persona", "/api/self-profile",
                               "/api/reunify", "/api/watch", "/api/connect", "/api/unlink",
                               "/api/safe-phrases", "/api/safe-phrases/delete",
                               "/api/autonomy", "/api/killswitch",
@@ -815,6 +825,8 @@ def make_handler(db_path):
                     return self._send(200, api_add_self(conn, payload))
                 if u.path == "/api/self/remove":
                     return self._send(200, api_remove_self(conn, payload))
+                if u.path == "/api/self/dismiss":
+                    return self._send(200, api_self_dismiss(conn, payload))
                 if u.path == "/api/self/person":
                     return self._send(200, api_mark_person_self(conn, payload))
                 if u.path == "/api/self/persona":
@@ -1041,15 +1053,17 @@ input{padding:6px 8px;border:1px solid var(--border);border-radius:6px;width:100
  <div id=unify class=hide>
   <div style="display:flex;justify-content:space-between;align-items:center">
    <b>🔄 归一工作台</b><button class=go onclick="toggleUnify()">✕ 关闭</button></div>
-  <h2>🪞 我的身份（SELF · 这些号发的都认作「我」）</h2><div id=self_reg></div>
-  <div class=sec style="margin-top:6px">🔎 疑似你自己的号（点「这是我」才纳入；不理会也行）</div><div id=self_sug></div>
+  <div class=tag style="padding:2px 6px;color:var(--fg2);margin-bottom:4px">「归一」= 把散在多个微信号/电话里、其实<b>同一个人</b>的会话认成一个人；也把<b>你自己的号</b>标成「我」。下面分三块：① 已认作你的 ② 疑似你的（待你确认/擦掉）③ 联系人合并。</div>
+  <h2>🪞 ① 已认作「我」的号（这些号发的消息都算你发的）</h2><div id=self_reg></div>
+  <div class=sec style="margin-top:6px">🔎 ② 疑似你自己的号 —— 是你 → 「✅ 这是我」；不是 → 「✕ 不是我」擦掉(不再弹)</div><div id=self_sug></div>
   <h2>🧩 人归并候选</h2><div id=unify_cands></div>
   <h2>🧬 我是谁（用于 LLM·随时可改）</h2>
   <div class=row><textarea id=selfprofile rows=5 style="width:100%;border:1px solid #ccc;border-radius:6px;padding:6px" placeholder="班迪这个自然人：性格 / 灵魂 / 喜好 / 工作中的特征 / 核心词……（喂给 AI 起草/诊断，体现你的人味）"></textarea></div>
   <div class=row><button class=go onclick="saveProfile()">💾 保存「我是谁」</button></div>
-  <h2>🔄 归并操作</h2>
-  <div class=row><button class=go onclick="runReunify(false)">🔄 启动归一</button>
-   <button class=danger onclick="runReunify(true)">♻️ 复位归一</button><span id=reuniout></span></div>
+  <h2>🔄 合并操作（跑一遍认人算法）</h2>
+  <div class=tag style="padding:2px 6px;color:var(--fg2)">按 wxid/电话精确匹配，把同一个人的会话认到一起。手工确认过的不会被覆盖。</div>
+  <div class=row><button class=go onclick="runReunify(false)" title="按 wxid/电话把同一个人的会话认到一起 + 把你的号标成「我」">🔗 现在合并一次</button>
+   <button class=danger onclick="runReunify(true)" title="清掉自动合并的结果(人工确认的保留)再重合 — 自动合乱了用它">♻️ 清空自动合并·重来</button><span id=reuniout></span></div>
   <h2>👥 人管理</h2><div id=people></div>
  </div>
  <div id=prefs class=hide>
@@ -1375,7 +1389,8 @@ async function loadSettings(){
   return `<div class=row><b>${esc(s.kind)}</b> <span class=id>${esc(s.identifier)}</span>
    <span class=tag>${esc(s.name||'')}${s.reason?' · '+esc(s.reason):''}</span>
    <select>${opts}</select>
-   <button class=go onclick="addSelf('${esc(s.kind)}','${esc(s.identifier)}',this)">✅ 这是我，纳入</button></div>`
+   <button class=go onclick="addSelf('${esc(s.kind)}','${esc(s.identifier)}',this)">✅ 这是我</button>
+   <button class=x onclick="dismissSelf('${esc(s.kind)}','${esc(s.identifier)}')" title="不是你的号 → 擦掉, 以后不再弹(可撤)">✕ 不是我</button></div>`
   }).join('')||'<div class=tag style=padding:6px>(暂无建议)</div>';
  const ps=await E('/persons');
  document.getElementById('people').innerHTML=(ps||[]).map(p=>
@@ -1390,6 +1405,7 @@ async function markSelf(pid,name){if(!confirm('把「'+name+'」标为你自己?
  await P('/self/person',{person_id:pid});toast('已设为自我 🪞');loadSettings()}
 async function addSelf(kind,identifier,btn){const persona=btn.parentNode.querySelector('select').value;
  await P('/self',{kind,identifier,persona});toast('已纳入「我的」');loadSettings()}
+async function dismissSelf(kind,identifier){await P('/self/dismiss',{kind,identifier});toast('已擦掉·不再弹 ✕');loadSettings()}
 async function setPersona(kind,identifier,persona){await P('/self/persona',{kind,identifier,persona});toast('persona 已改: '+persona)}
 async function saveBackend(tool){const url=document.getElementById('be_'+tool).value.trim();
  const r=await P('/backend',{tool,url});

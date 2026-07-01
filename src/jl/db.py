@@ -949,17 +949,53 @@ def seed_self_from_accounts(conn):
     return n
 
 
+def _self_dismissed_set(conn):
+    """The set of dismissed self-candidate keys ('kind:canon_identifier'). Stored as a
+    JSON list in app_settings (reversible; no schema migration). Never raises."""
+    try:
+        return set(json.loads(get_setting(conn, "self_dismissed", "[]")) or [])
+    except (ValueError, TypeError):
+        return set()
+
+
+def _self_dismiss_key(kind, identifier):
+    return f"{kind}:{_canon_identifier(kind, identifier)}"
+
+
+def dismiss_self_candidate(conn, kind, identifier):
+    """「✕ 不是我」: persistently dismiss a suggested self-candidate so suggest_self_identities
+    stops surfacing it. Canonicalized (device-suffix-insensitive). Reversible via
+    undismiss_self_candidate. Does NOT add to self (dismiss ≠ self)."""
+    d = _self_dismissed_set(conn)
+    d.add(_self_dismiss_key(kind, identifier))
+    set_setting(conn, "self_dismissed", json.dumps(sorted(d)))
+
+
+def undismiss_self_candidate(conn, kind, identifier):
+    """Undo a dismissal → the candidate can be suggested again (归一↔脱离 可逆)."""
+    d = _self_dismissed_set(conn)
+    d.discard(_self_dismiss_key(kind, identifier))
+    set_setting(conn, "self_dismissed", json.dumps(sorted(d)))
+
+
+def get_self_dismissed(conn):
+    """List of dismissed self-candidate keys ('kind:canon_identifier')."""
+    return sorted(_self_dismissed_set(conn))
+
+
 def suggest_self_identities(conn):
     """Auto-SUGGEST the user's own identities for HITL confirm (never auto-add). ONLY a
     high-confidence signal: each account's own self_id (the login identity we ingest FROM).
     Name-based guessing was removed — it surfaced garbage (文件传输助手, multi-name contacts)
-    and missed the real selves. Declare the rest via mark_person_self / explicit add."""
+    and missed the real selves. Declare the rest via mark_person_self / explicit add.
+    Candidates the human dismissed (「✕ 不是我」) are excluded (persistent, reversible)."""
     seen = {(s["kind"], s["identifier"]) for s in get_self_identities(conn)}
+    dismissed = _self_dismissed_set(conn)
     out = []
     for a in get_accounts(conn):
         sid = (a.get("self_id") or "").strip()
         key = (a["platform"], _canon_identifier(a["platform"], sid))
-        if sid and key not in seen:
+        if sid and key not in seen and _self_dismiss_key(a["platform"], sid) not in dismissed:
             seen.add(key)
             out.append({"kind": a["platform"], "identifier": sid,
                         "name": a.get("label", ""), "reason": "账号 self_id"})
